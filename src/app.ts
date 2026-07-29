@@ -11,6 +11,7 @@ import { globalRateLimiter } from "./middlewares/rate-limiter";
 import { errorHandler, notFoundHandler } from "./middlewares/error-handler";
 import { swaggerSpec } from "./docs/swagger";
 import routes from "./routes";
+import hikvisionWebhookRoutes from "./modules/hikvision-webhook/hikvision-webhook.routes";
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
 
@@ -46,6 +47,13 @@ export function createApp(): Application {
     }),
   );
   app.use(compression());
+
+  // Mounted before the JSON body parser / global rate limiter and outside API_PREFIX:
+  // this is the literal path configured in the Hikvision device's HTTP Listening
+  // settings, called directly by the device (no auth, not a browser, and it may
+  // fire in bursts) rather than through our normal API surface.
+  app.use("/faysid/api/hikvision/event", hikvisionWebhookRoutes);
+
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev", { stream: morganStream }));
