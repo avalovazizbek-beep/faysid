@@ -34,6 +34,14 @@ const RESERVED_PREFIXES = [env.API_PREFIX, `${BASE_PATH}/uploads`, `${BASE_PATH}
 export function createApp(): Application {
   const app = express();
 
+  // Production sits behind exactly one reverse proxy (nginx) which sets
+  // X-Forwarded-For — trust that one hop so express-rate-limit (and req.ip)
+  // resolve the real client IP instead of nginx's own address, and so the
+  // X-Forwarded-For header doesn't trip express-rate-limit's spoofing guard
+  // (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR) when trust proxy is left at the
+  // default `false`. Local dev has no reverse proxy in front, so leave it off there.
+  if (isProduction) app.set("trust proxy", 1);
+
   app.disable("x-powered-by");
   app.use(helmet());
   app.use(
