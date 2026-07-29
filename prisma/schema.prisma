@@ -1,0 +1,497 @@
+// FaceHub ERP — Core Prisma schema (Phase 1: Auth + Organization foundation)
+// Employee / Attendance / Device / Payroll tables are added in later phases.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrganizationStatus {
+  TRIAL
+  ACTIVE
+  BLOCKED
+  EXPIRED
+}
+
+enum OrganizationPackage {
+  TRIAL
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+enum LicenseStatus {
+  ACTIVE
+  EXPIRED
+  DISABLED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ORG_ADMIN
+  STAFF
+}
+
+enum ShiftType {
+  NORMAL
+  NIGHT
+  TWO_BY_TWO
+  FLEXIBLE
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AttendanceType {
+  FACE
+  FINGER
+  CARD
+  PIN
+  MANUAL
+}
+
+enum DeviceVendor {
+  HIKVISION
+  ZKTECO
+  DAHUA
+  SUPREMA
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+}
+
+enum DeviceSyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  BUSINESS_TRIP
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PayrollStatus {
+  DRAFT
+  FINALIZED
+}
+
+/// A tenant. Every organization-scoped table carries organizationId + an index on it.
+model Organization {
+  id               String              @id @default(uuid())
+  name             String
+  domain           String              @unique
+  logoUrl          String?
+  timezone         String              @default("Asia/Tashkent")
+  language         String              @default("uz")
+  status           OrganizationStatus  @default(TRIAL)
+  package          OrganizationPackage @default(TRIAL)
+  ownerId          String?             @unique
+  licenseExpiresAt DateTime?
+  telegramChatId   String?
+
+  settings Json?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  owner       User?        @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  users       User[]       @relation("OrganizationUsers")
+  licenses    License[]
+  roles       Role[]
+  auditLogs   AuditLog[]
+  departments Department[]
+  employees   Employee[]
+  shifts      Shift[]
+  attendances Attendance[]
+  devices     Device[]
+  leaves      Leave[]
+  payrolls    Payroll[]
+  holidays    Holiday[]
+
+  @@index([status])
+  @@index([package])
+  @@map("organizations")
+}
+
+model License {
+  id               String              @id @default(uuid())
+  organizationId   String
+  licenseKey       String              @unique
+  package          OrganizationPackage
+  startDate        DateTime
+  endDate          DateTime
+  digitalSignature String              @db.Text
+  encryptedKey     String              @db.Text
+  status           LicenseStatus       @default(ACTIVE)
+  version          Int                 @default(1)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([endDate])
+  @@map("licenses")
+}
+
+/// Platform-wide roles (SUPER_ADMIN, scoped to organizationId = null) and
+/// organization-scoped roles (ORG_ADMIN / custom roles per organization).
+model Role {
+  id             String  @id @default(uuid())
+  organizationId String?
+  name           String
+  description    String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  permissions  RolePermission[]
+  users        User[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(uuid())
+  code        String  @unique // e.g. "organization.create", "employee.delete"
+  description String?
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Platform users: SUPER_ADMIN users have organizationId = null.
+/// ORG_ADMIN / STAFF users belong to exactly one organization.
+model User {
+  id               String   @id @default(uuid())
+  organizationId   String?
+  roleId           String?
+  role             UserRole @default(STAFF)
+  fullName         String
+  email            String   @unique
+  passwordHash     String
+  phone            String?
+  isActive         Boolean  @default(true)
+  twoFactorSecret  String?
+  twoFactorEnabled Boolean  @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization  Organization?  @relation("OrganizationUsers", fields: [organizationId], references: [id], onDelete: Cascade)
+  ownedOrg      Organization?  @relation("OrganizationOwner")
+  userRole      Role?          @relation(fields: [roleId], references: [id])
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+
+  @@index([organizationId])
+  @@index([roleId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id             String  @id @default(uuid())
+  organizationId String?
+  userId         String?
+  action         String // e.g. "LOGIN", "ORGANIZATION_CREATE", "LICENSE_RENEW"
+  entityType     String?
+  entityId       String?
+  metadata       Json?
+  ipAddress      String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model Department {
+  id             String  @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("departments")
+}
+
+/// Face credential reuses `photoUrl` below. Fingerprint can only realistically
+/// arrive from a real scanner (device -> platform sync), so it has a
+/// schema-ready column but no manual-entry UI.
+model Employee {
+  id                  String         @id @default(uuid())
+  organizationId      String
+  departmentId        String?
+  shiftId             String?
+  employeeCode        String
+  fullName            String
+  phone               String?
+  passportNumber      String?
+  jshshir             String?
+  position            String?
+  salary              Decimal?       @db.Decimal(14, 2)
+  photoUrl            String?
+  cardNumber          String?
+  pinCodeHash         String?
+  fingerprintTemplate String?        @db.Text
+  status              EmployeeStatus @default(ACTIVE)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department   Department?          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  shift        Shift?               @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  attendances  Attendance[]
+  deviceSyncs  DeviceEmployeeSync[]
+  leaves       Leave[]
+  payrolls     Payroll[]
+
+  @@unique([organizationId, employeeCode])
+  @@index([organizationId])
+  @@index([departmentId])
+  @@index([shiftId])
+  @@index([status])
+  @@map("employees")
+}
+
+model Shift {
+  id                   String    @id @default(uuid())
+  organizationId       String
+  name                 String
+  type                 ShiftType @default(NORMAL)
+  startTime            String // "HH:mm"
+  endTime              String // "HH:mm"
+  lateThresholdMinutes Int       @default(15)
+  workingHoursPerDay   Int       @default(8)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("shifts")
+}
+
+/// One row per employee per day (not a raw punch log) — matches the dashboard
+/// metrics the spec needs (kelgan/kelmagan/ichkarida/kechikkan/ishlagan soat).
+model Attendance {
+  id             String         @id @default(uuid())
+  organizationId String
+  employeeId     String
+  date           DateTime       @db.Date
+  checkInAt      DateTime?
+  checkOutAt     DateTime?
+  type           AttendanceType @default(MANUAL)
+  isLate         Boolean        @default(false)
+  workedMinutes  Int?
+  /// Accumulated minutes across all checked-out gaps within the day (re-entry support).
+  breakMinutes   Int            @default(0)
+  /// Start of the currently-open session — distinct from checkInAt, which stays fixed
+  /// at the day's first check-in once set.
+  lastCheckInAt  DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([organizationId])
+  @@index([date])
+  @@index([employeeId])
+  @@map("attendances")
+}
+
+/// Reconnect/heartbeat are real (TCP reachability check / caller ping). Restart
+/// and the actual face/finger/card protocol push in DeviceEmployeeSync are
+/// simulated — there's no vendor SDK/hardware to talk to for real yet.
+model Device {
+  id              String       @id @default(uuid())
+  organizationId  String
+  name            String
+  vendor          DeviceVendor
+  ipAddress       String
+  port            Int          @default(4370)
+  macAddress      String?
+  serialNumber    String?
+  firmwareVersion String?
+  status          DeviceStatus @default(OFFLINE)
+  lastSeenAt      DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization  Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employeeSyncs DeviceEmployeeSync[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("devices")
+}
+
+model DeviceEmployeeSync {
+  id           String           @id @default(uuid())
+  deviceId     String
+  employeeId   String
+  status       DeviceSyncStatus @default(PENDING)
+  syncedAt     DateTime?
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  device   Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, employeeId])
+  @@index([deviceId])
+  @@index([employeeId])
+  @@map("device_employee_syncs")
+}
+
+model Leave {
+  id               String      @id @default(uuid())
+  organizationId   String
+  employeeId       String
+  type             LeaveType
+  startDate        DateTime    @db.Date
+  endDate          DateTime    @db.Date
+  reason           String?     @db.Text
+  status           LeaveStatus @default(PENDING)
+  approvedByUserId String?
+  approvedAt       DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([employeeId])
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+  @@map("leaves")
+}
+
+model Payroll {
+  id              String        @id @default(uuid())
+  organizationId  String
+  employeeId      String
+  periodMonth     Int
+  periodYear      Int
+  baseSalary      Decimal       @db.Decimal(14, 2)
+  workedDays      Int
+  lateDays        Int
+  absentDays      Int
+  overtimeMinutes Int
+  overtimePay     Decimal       @db.Decimal(14, 2)
+  bonus           Decimal       @default(0) @db.Decimal(14, 2)
+  penalty         Decimal       @default(0) @db.Decimal(14, 2)
+  totalPay        Decimal       @db.Decimal(14, 2)
+  status          PayrollStatus @default(DRAFT)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, periodMonth, periodYear])
+  @@index([organizationId])
+  @@index([periodYear, periodMonth])
+  @@map("payrolls")
+}
+
+model Holiday {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  date           DateTime @db.Date
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([date])
+  @@map("holidays")
+}
