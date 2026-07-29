@@ -1,4 +1,5 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import express, { Application } from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -20,6 +21,15 @@ const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
 // for the other two mounts so they move together instead of needing separate config.
 // In plain local dev, API_PREFIX="/api/v1" and this is just "".
 const BASE_PATH = env.API_PREFIX.replace(/\/api\/v1$/, "");
+
+// On some shared-hosting setups nginx proxies the whole public path (e.g. /faysid/)
+// to this one process with no separate static site — in that case the built frontend
+// is copied to backend/public and this same Express app serves it too. In plain local
+// dev (frontend served by its own Vite dev server) this folder never exists, so all of
+// this is a no-op.
+const FRONTEND_DIST = path.join(__dirname, "..", "public");
+const SERVE_FRONTEND = existsSync(FRONTEND_DIST);
+const RESERVED_PREFIXES = [env.API_PREFIX, `${BASE_PATH}/uploads`, `${BASE_PATH}/api/hikvision/event`, "/api/docs"];
 
 export function createApp(): Application {
   const app = express();
@@ -67,6 +77,19 @@ export function createApp(): Application {
 
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   app.use(env.API_PREFIX, routes);
+
+  if (SERVE_FRONTEND) {
+    app.use(express.static(FRONTEND_DIST));
+    // SPA fallback: any non-API GET request falls through to index.html so
+    // client-side routing (React Router) can take over on a hard refresh.
+    app.get(/.*/, (req, res, next) => {
+      if (RESERVED_PREFIXES.some((prefix) => prefix && req.path.startsWith(prefix))) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(FRONTEND_DIST, "index.html"));
+    });
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);
