@@ -26,3 +26,14 @@ export type UpdateDeviceDto = z.infer<typeof updateDeviceSchema>;
 export const deviceIdParamSchema = z.object({
   id: z.string().uuid(),
 });
+
+export const deviceEmployeeSyncParamSchema = z.object({
+  id: z.string().uuid(),
+  employeeId: z.string().uuid(),
+});
+
+export const ackEmployeeSyncSchema = z.object({
+  status: z.enum(["SYNCED", "FAILED"]),
+  errorMessage: z.string().max(1000).optional(),
+});
+export type AckEmployeeSyncDto = z.infer<typeof ackEmployeeSyncSchema>;

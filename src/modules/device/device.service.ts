@@ -123,3 +123,39 @@ export async function listDeviceSyncs(organizationId: string, deviceId: string) 
     orderBy: { updatedAt: "desc" },
   });
 }
+
+/** Real list for the desktop bridge to push over ISAPI — same eligibility as sync() above. */
+export async function listEmployeesToSync(organizationId: string, deviceId: string) {
+  await getOwnedDevice(organizationId, deviceId);
+
+  return prisma.employee.findMany({
+    where: {
+      organizationId,
+      deletedAt: null,
+      status: "ACTIVE",
+      OR: [{ photoUrl: { not: null } }, { cardNumber: { not: null } }, { pinCodeHash: { not: null } }],
+    },
+    select: { id: true, employeeCode: true, fullName: true, cardNumber: true, photoUrl: true },
+  });
+}
+
+/** Records the real outcome of a desktop-bridge push for one employee. */
+export async function ackEmployeeSync(
+  organizationId: string,
+  deviceId: string,
+  employeeId: string,
+  status: "SYNCED" | "FAILED",
+  errorMessage?: string,
+) {
+  const device = await getOwnedDevice(organizationId, deviceId);
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, organizationId, deletedAt: null } });
+  if (!employee) {
+    throw ApiError.notFound("Employee not found");
+  }
+
+  return prisma.deviceEmployeeSync.upsert({
+    where: { deviceId_employeeId: { deviceId: device.id, employeeId } },
+    create: { deviceId: device.id, employeeId, status, syncedAt: status === "SYNCED" ? new Date() : null, errorMessage },
+    update: { status, syncedAt: status === "SYNCED" ? new Date() : null, errorMessage: errorMessage ?? null },
+  });
+}

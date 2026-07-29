@@ -5,14 +5,22 @@ import { authorize } from "../../middlewares/authorize";
 import { requireTenant } from "../../middlewares/tenant-resolver";
 import { blockIfReadOnly } from "../../middlewares/enforce-read-only";
 import { validate } from "../../middlewares/validate";
-import { createDeviceSchema, deviceIdParamSchema, updateDeviceSchema } from "./device.dto";
 import {
+  ackEmployeeSyncSchema,
+  createDeviceSchema,
+  deviceEmployeeSyncParamSchema,
+  deviceIdParamSchema,
+  updateDeviceSchema,
+} from "./device.dto";
+import {
+  ackEmployeeSyncHandler,
   createDeviceHandler,
   deleteDeviceHandler,
   getDeviceHandler,
   heartbeatDeviceHandler,
   listDeviceSyncsHandler,
   listDevicesHandler,
+  listEmployeesToSyncHandler,
   reconnectDeviceHandler,
   restartDeviceHandler,
   syncDeviceHandler,
@@ -94,5 +102,33 @@ router.post("/:id/restart", validate({ params: deviceIdParamSchema }), restartDe
  */
 router.post("/:id/sync", validate({ params: deviceIdParamSchema }), syncDeviceHandler);
 router.get("/:id/syncs", validate({ params: deviceIdParamSchema }), listDeviceSyncsHandler);
+
+/**
+ * @openapi
+ * /devices/{id}/employees-to-sync:
+ *   get:
+ *     summary: Real list of employees eligible to be pushed to the device (used by the desktop bridge)
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Employees with photo/card/pin credentials to enroll }
+ */
+router.get("/:id/employees-to-sync", validate({ params: deviceIdParamSchema }), listEmployeesToSyncHandler);
+
+/**
+ * @openapi
+ * /devices/{id}/syncs/{employeeId}/ack:
+ *   post:
+ *     summary: Report the real outcome of pushing one employee to the device (called by the desktop bridge)
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: DeviceEmployeeSync row updated with the real result }
+ */
+router.post(
+  "/:id/syncs/:employeeId/ack",
+  validate({ params: deviceEmployeeSyncParamSchema, body: ackEmployeeSyncSchema }),
+  ackEmployeeSyncHandler,
+);
 
 export default router;

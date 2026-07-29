@@ -52,3 +52,20 @@ export const listDeviceSyncsHandler = asyncHandler(async (req: Request, res: Res
   const syncs = await deviceService.listDeviceSyncs(req.tenantId!, req.params.id);
   sendSuccess(res, syncs);
 });
+
+export const listEmployeesToSyncHandler = asyncHandler(async (req: Request, res: Response) => {
+  const employees = await deviceService.listEmployeesToSync(req.tenantId!, req.params.id);
+  sendSuccess(res, employees);
+});
+
+export const ackEmployeeSyncHandler = asyncHandler(async (req: Request, res: Response) => {
+  const { status, errorMessage } = req.body;
+  const result = await deviceService.ackEmployeeSync(
+    req.tenantId!,
+    req.params.id,
+    req.params.employeeId,
+    status,
+    errorMessage,
+  );
+  sendSuccess(res, result);
+});
