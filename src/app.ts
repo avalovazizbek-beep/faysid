@@ -15,6 +15,12 @@ import hikvisionWebhookRoutes from "./modules/hikvision-webhook/hikvision-webhoo
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
 
+// On shared hosting the whole app (API + uploads + the device webhook) is namespaced
+// under a path prefix, e.g. API_PREFIX="/faysid/api/v1" — derive that same base ("/faysid")
+// for the other two mounts so they move together instead of needing separate config.
+// In plain local dev, API_PREFIX="/api/v1" and this is just "".
+const BASE_PATH = env.API_PREFIX.replace(/\/api\/v1$/, "");
+
 export function createApp(): Application {
   const app = express();
 
@@ -37,7 +43,7 @@ export function createApp(): Application {
     }),
   );
   app.use(
-    "/uploads",
+    `${BASE_PATH}/uploads`,
     express.static(path.join(__dirname, "..", "uploads"), {
       setHeaders: (res) => {
         // Helmet's default same-origin CORP would otherwise block the frontend
@@ -52,7 +58,7 @@ export function createApp(): Application {
   // this is the literal path configured in the Hikvision device's HTTP Listening
   // settings, called directly by the device (no auth, not a browser, and it may
   // fire in bursts) rather than through our normal API surface.
-  app.use("/faysid/api/hikvision/event", hikvisionWebhookRoutes);
+  app.use(`${BASE_PATH}/api/hikvision/event`, hikvisionWebhookRoutes);
 
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
