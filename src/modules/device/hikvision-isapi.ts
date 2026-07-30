@@ -234,12 +234,20 @@ export async function searchAcsEvents(
     }
 
     const parsed = JSON.parse(text) as {
-      AcsEvent?: { InfoList?: { employeeNoString?: string; time?: string; attendanceStatus?: string }[] };
+      AcsEvent?: { InfoList?: Record<string, unknown>[] };
     };
     const page = parsed.AcsEvent?.InfoList ?? [];
+    if (page.length > 0) {
+      // Temporary diagnostic: attendanceStatus has come back empty against
+      // the real device — log the full raw event once so the correct field
+      // (if named differently) can be identified and mapped.
+      logger.info(`Hikvision AcsEvent raw sample: ${JSON.stringify(page[0])}`);
+    }
     for (const e of page) {
-      if (e.employeeNoString && e.time) {
-        events.push({ employeeNo: e.employeeNoString, time: e.time, attendanceStatus: e.attendanceStatus ?? "" });
+      const employeeNoString = e.employeeNoString as string | undefined;
+      const time = e.time as string | undefined;
+      if (employeeNoString && time) {
+        events.push({ employeeNo: employeeNoString, time, attendanceStatus: (e.attendanceStatus as string) ?? "" });
       }
     }
 

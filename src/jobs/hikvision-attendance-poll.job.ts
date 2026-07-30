@@ -36,12 +36,26 @@ export async function runHikvisionAttendancePoll(): Promise<void> {
       };
       const events = await searchAcsEvents(target, startTime, endTime);
 
-      for (const event of events) {
+      // A single physical scan can produce more than one identical log entry
+      // on the device (e.g. a "verify" and a "door open" record for the same
+      // instant). Without deduping, two same-timestamp entries for one
+      // employee would flip check-in -> check-out on the very same scan when
+      // direction has to be inferred (see attendance-recorder.ts). Keep only
+      // the first entry per (employeeNo, time) pair.
+      const seen = new Set<string>();
+      const deduped = events.filter((event) => {
+        const key = `${event.employeeNo}|${event.time}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      for (const event of deduped) {
         await recordDeviceAttendanceEvent(device, event.employeeNo, event.attendanceStatus, "poll");
       }
 
-      if (events.length > 0) {
-        logger.info(`Hikvision attendance poll: processed ${events.length} event(s) for device ${device.id}`);
+      if (deduped.length > 0) {
+        logger.info(`Hikvision attendance poll: processed ${deduped.length} event(s) for device ${device.id}`);
       }
 
       await prisma.device.update({ where: { id: device.id }, data: { lastPolledEventAt: endTime } });

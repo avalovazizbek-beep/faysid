@@ -3,6 +3,11 @@ import { logger } from "../../config/logger";
 import { recordAuditLog } from "../../common/audit-log";
 import { checkIn, checkOut } from "../attendance/attendance.service";
 
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 /**
  * Shared employee-match + check-in/check-out logic used by both the push
  * webhook (hikvision-webhook.service.ts) and the ISAPI attendance-polling
@@ -39,8 +44,29 @@ export async function recordDeviceAttendanceEvent(
   }
 
   const status = attendanceStatus.toLowerCase();
-  const isCheckOut = status.includes("out");
-  const isCheckIn = status.includes("in");
+  let isCheckOut = status.includes("out");
+  let isCheckIn = status.includes("in");
+
+  // Many single-door/standalone terminals (no separate entry/exit readers)
+  // never report an explicit direction at all — every verified event looks
+  // identical. When that's the case, infer direction the same way the
+  // manual attendance toggle does: if the employee is currently "inside"
+  // (checked in, not checked out today), this event must be a check-out.
+  if (!isCheckOut && !isCheckIn) {
+    const todayAttendance = await prisma.attendance.findUnique({
+      where: { employeeId_date: { employeeId: employee.id, date: startOfToday() } },
+    });
+    if (todayAttendance?.checkInAt && !todayAttendance.checkOutAt) {
+      isCheckOut = true;
+    } else {
+      isCheckIn = true;
+    }
+    logger.info(
+      `Hikvision ${source}: attendanceStatus was empty/unrecognized ("${attendanceStatus}") — inferred ${
+        isCheckOut ? "check-out" : "check-in"
+      } from current session state for employee ${employee.id}`,
+    );
+  }
 
   try {
     if (isCheckOut) {
