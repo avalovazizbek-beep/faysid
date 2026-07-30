@@ -175,6 +175,25 @@ export interface HikvisionAttendanceEvent {
 }
 
 /**
+ * Hikvision's ISAPI rejects JS's default Date#toISOString() ("...ss.sssZ")
+ * with a "badJsonContent" / startTime error — confirmed live against the
+ * real device. It expects "YYYY-MM-DDTHH:mm:ss+HH:mm" (no milliseconds,
+ * explicit offset instead of "Z"). The device's own clock is local Uzbekistan
+ * time (UTC+5, no DST), so render the wall-clock time in that zone.
+ */
+function formatIsapiTime(date: Date): string {
+  const tashkent = new Date(date.getTime() + 5 * 60 * 60_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const y = tashkent.getUTCFullYear();
+  const mo = pad(tashkent.getUTCMonth() + 1);
+  const d = pad(tashkent.getUTCDate());
+  const h = pad(tashkent.getUTCHours());
+  const mi = pad(tashkent.getUTCMinutes());
+  const s = pad(tashkent.getUTCSeconds());
+  return `${y}-${mo}-${d}T${h}:${mi}:${s}+05:00`;
+}
+
+/**
  * Polls the device's own access-control event log (AcsEvent) for real
  * attendance events — the fallback path for when the device's HTTP Listening
  * push (the webhook) never actually fires. Paginates in batches of 30 like
@@ -199,8 +218,8 @@ export async function searchAcsEvents(
         maxResults: pageSize,
         major: 0,
         minor: 0,
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
+        startTime: formatIsapiTime(startTime),
+        endTime: formatIsapiTime(endTime),
       },
     });
     const { status, text } = await digestRequest(
@@ -331,13 +350,27 @@ export async function enrollEmployee(device: HikvisionDeviceTarget, employee: Hi
       Valid: { enable: true, beginTime: "2020-01-01T00:00:00", endTime: "2037-12-31T23:59:59" },
     },
   });
-  const userInfoResult = await digestRequest(
+  let userInfoResult = await digestRequest(
     device,
     "POST",
     "/ISAPI/AccessControl/UserInfo/Record?format=json",
     userInfoBody,
     "application/json",
   );
+
+  // "Record" only creates NEW people — confirmed live that a second sync of
+  // the same employee correctly fails with subStatusCode "employeeNoAlreadyExist".
+  // Fall back to Modify (update) for that case instead of treating it as an error.
+  if (userInfoResult.status !== 200 && userInfoResult.text.includes("employeeNoAlreadyExist")) {
+    userInfoResult = await digestRequest(
+      device,
+      "PUT",
+      "/ISAPI/AccessControl/UserInfo/Modify?format=json",
+      userInfoBody,
+      "application/json",
+    );
+  }
+
   if (userInfoResult.status !== 200) {
     throw new HikvisionIsapiError(
       `UserInfo push failed (${userInfoResult.status}): ${userInfoResult.text.slice(0, 500)}`,
