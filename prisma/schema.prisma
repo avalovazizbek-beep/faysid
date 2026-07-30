@@ -390,6 +390,13 @@ model Device {
   status          DeviceStatus @default(OFFLINE)
   lastSeenAt      DateTime?
 
+  // Device-local ISAPI admin login (Hikvision), needed to push/pull real data
+  // once the device is reachable (e.g. via port-forwarding). Password is
+  // AES-256-GCM encrypted at rest — see common/secret-crypto.ts — never stored
+  // or returned as plaintext.
+  isapiUsername    String?
+  isapiPasswordEnc String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?

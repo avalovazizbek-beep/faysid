@@ -9,6 +9,11 @@ export const createDeviceSchema = z.object({
   macAddress: z.string().max(50).optional(),
   serialNumber: z.string().max(100).optional(),
   firmwareVersion: z.string().max(50).optional(),
+  // Device's own local admin login (Hikvision ISAPI) — needed to actually push/pull
+  // real data once the device is network-reachable. Optional: without it, sync/
+  // reconnect fall back to their previous simulated/TCP-only behavior.
+  isapiUsername: z.string().max(100).optional(),
+  isapiPassword: z.string().max(200).optional(),
 });
 export type CreateDeviceDto = z.infer<typeof createDeviceSchema>;
 
@@ -20,6 +25,8 @@ export const updateDeviceSchema = z.object({
   macAddress: z.string().max(50).optional(),
   serialNumber: z.string().max(100).optional(),
   firmwareVersion: z.string().max(50).optional(),
+  isapiUsername: z.string().max(100).optional(),
+  isapiPassword: z.string().max(200).optional(),
 });
 export type UpdateDeviceDto = z.infer<typeof updateDeviceSchema>;
 

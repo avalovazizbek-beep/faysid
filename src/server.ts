@@ -8,6 +8,7 @@ import { initSocket } from "./config/socket";
 import { startLicenseExpiryCron } from "./jobs/license-expiry.job";
 import { startDeviceOfflineCron } from "./jobs/device-offline.job";
 import { startDailyReportCron } from "./jobs/daily-report.job";
+import { startHikvisionPollCron } from "./jobs/hikvision-poll.job";
 
 async function bootstrap(): Promise<void> {
   await prisma.$connect();
@@ -23,6 +24,7 @@ async function bootstrap(): Promise<void> {
   startLicenseExpiryCron();
   startDeviceOfflineCron();
   startDailyReportCron();
+  startHikvisionPollCron();
 
   const app = createApp();
   const httpServer = createServer(app);

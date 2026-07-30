@@ -1,19 +1,51 @@
 import { connect } from "node:net";
+import { Device } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../common/api-error";
 import { recordAuditLog } from "../../common/audit-log";
+import { logger } from "../../config/logger";
+import { encryptSecret, decryptSecret } from "../../common/secret-crypto";
 import { CreateDeviceDto, UpdateDeviceDto } from "./device.dto";
+import * as isapi from "./hikvision-isapi";
+
+/** Never return the encrypted password; expose only whether one is configured. */
+function sanitizeDevice<T extends Partial<Device>>(device: T): Omit<T, "isapiPasswordEnc"> & { hasIsapiCredentials: boolean } {
+  const { isapiPasswordEnc, ...rest } = device;
+  return { ...rest, hasIsapiCredentials: Boolean(isapiPasswordEnc && device.isapiUsername) };
+}
+
+function isapiTarget(device: Device): isapi.HikvisionDeviceTarget | null {
+  if (device.vendor !== "HIKVISION" || !device.isapiUsername || !device.isapiPasswordEnc) return null;
+  return {
+    ipAddress: device.ipAddress,
+    port: device.port,
+    isapiUsername: device.isapiUsername,
+    isapiPassword: decryptSecret(device.isapiPasswordEnc),
+  };
+}
+
+function toPrismaData<T extends { isapiPassword?: string }>(
+  dto: T,
+): Omit<T, "isapiPassword"> & { isapiPasswordEnc?: string } {
+  const { isapiPassword, ...rest } = dto;
+  return {
+    ...rest,
+    ...(isapiPassword ? { isapiPasswordEnc: encryptSecret(isapiPassword) } : {}),
+  };
+}
 
 export async function createDevice(organizationId: string, dto: CreateDeviceDto) {
-  return prisma.device.create({ data: { organizationId, ...dto } });
+  const device = await prisma.device.create({ data: { organizationId, ...toPrismaData(dto) } });
+  return sanitizeDevice(device);
 }
 
 export async function listDevices(organizationId: string) {
-  return prisma.device.findMany({
+  const devices = await prisma.device.findMany({
     where: { organizationId, deletedAt: null },
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { employeeSyncs: true } } },
   });
+  return devices.map(sanitizeDevice);
 }
 
 export async function getOwnedDevice(organizationId: string, id: string) {
@@ -26,7 +58,8 @@ export async function getOwnedDevice(organizationId: string, id: string) {
 
 export async function updateDevice(organizationId: string, id: string, dto: UpdateDeviceDto) {
   await getOwnedDevice(organizationId, id);
-  return prisma.device.update({ where: { id }, data: dto });
+  const device = await prisma.device.update({ where: { id }, data: toPrismaData(dto) });
+  return sanitizeDevice(device);
 }
 
 export async function deleteDevice(organizationId: string, id: string) {
@@ -36,32 +69,51 @@ export async function deleteDevice(organizationId: string, id: string) {
 
 export async function heartbeat(organizationId: string, id: string) {
   await getOwnedDevice(organizationId, id);
-  return prisma.device.update({ where: { id }, data: { status: "ONLINE", lastSeenAt: new Date() } });
+  const device = await prisma.device.update({ where: { id }, data: { status: "ONLINE", lastSeenAt: new Date() } });
+  return sanitizeDevice(device);
 }
 
-/** Real TCP reachability check — not simulated. Vendor protocol handshake itself is out of scope without an SDK. */
+/**
+ * Reconnect/status check. When ISAPI credentials are configured, this is a
+ * real authenticated HTTP call to the device (proves the full network path +
+ * login work, not just that a TCP port is open). Otherwise falls back to the
+ * previous raw-TCP reachability check.
+ */
 export async function reconnect(organizationId: string, id: string) {
   const device = await getOwnedDevice(organizationId, id);
+  const target = isapiTarget(device);
 
-  const reachable = await new Promise<boolean>((resolve) => {
-    const socket = connect({ host: device.ipAddress, port: device.port, timeout: 2000 });
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(true);
+  let reachable: boolean;
+  if (target) {
+    try {
+      await isapi.fetchDeviceInfo(target);
+      reachable = true;
+    } catch (error) {
+      logger.warn(`Hikvision reconnect check failed for device ${id}: ${error}`);
+      reachable = false;
+    }
+  } else {
+    reachable = await new Promise<boolean>((resolve) => {
+      const socket = connect({ host: device.ipAddress, port: device.port, timeout: 2000 });
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once("timeout", () => {
+        socket.destroy();
+        resolve(false);
+      });
+      socket.once("error", () => {
+        resolve(false);
+      });
     });
-    socket.once("timeout", () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.once("error", () => {
-      resolve(false);
-    });
-  });
+  }
 
-  return prisma.device.update({
+  const updated = await prisma.device.update({
     where: { id },
     data: reachable ? { status: "ONLINE", lastSeenAt: new Date() } : { status: "OFFLINE" },
   });
+  return sanitizeDevice(updated);
 }
 
 /** Simulated — no vendor SDK available to actually restart hardware. */
@@ -82,36 +134,88 @@ export async function restart(organizationId: string, id: string, actorUserId?: 
   };
 }
 
-/** Simulated push of Face(photo)/Card/PIN to the device — there's no real hardware on the other end yet. */
+function eligibleEmployeesWhere(organizationId: string) {
+  return {
+    organizationId,
+    deletedAt: null,
+    status: "ACTIVE" as const,
+    OR: [{ photoUrl: { not: null } }, { cardNumber: { not: null } }, { pinCodeHash: { not: null } }],
+  };
+}
+
+/**
+ * Pushes Face(photo)/Card data to the device. Real over ISAPI when the device
+ * has isapiUsername/isapiPassword configured (Hikvision); otherwise falls
+ * back to the previous simulated behavior (no vendor SDK/credentials to act on).
+ */
 export async function sync(organizationId: string, id: string) {
   const device = await getOwnedDevice(organizationId, id);
+  const target = isapiTarget(device);
 
   const employees = await prisma.employee.findMany({
-    where: {
-      organizationId,
-      deletedAt: null,
-      status: "ACTIVE",
-      OR: [{ photoUrl: { not: null } }, { cardNumber: { not: null } }, { pinCodeHash: { not: null } }],
-    },
-    select: { id: true },
+    where: eligibleEmployeesWhere(organizationId),
+    select: { id: true, employeeCode: true, fullName: true, cardNumber: true, photoUrl: true },
   });
 
-  const results = await Promise.all(
-    employees.map((employee) =>
-      prisma.deviceEmployeeSync.upsert({
+  if (!target) {
+    const results = await Promise.all(
+      employees.map((employee) =>
+        prisma.deviceEmployeeSync.upsert({
+          where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
+          create: { deviceId: device.id, employeeId: employee.id, status: "SYNCED", syncedAt: new Date() },
+          update: { status: "SYNCED", syncedAt: new Date(), errorMessage: null },
+        }),
+      ),
+    );
+    await recordAuditLog({ organizationId, action: "DEVICE_SYNC", entityType: "Device", entityId: id, metadata: { employeeCount: results.length, simulated: true } });
+    return {
+      simulated: true,
+      message: "ISAPI login/parol sozlanmagan — sinxronizatsiya simulyatsiya qilindi. Qurilmaning haqiqiy admin login/parolini kiriting.",
+      syncedCount: results.length,
+    };
+  }
+
+  let succeeded = 0;
+  let failed = 0;
+  for (const employee of employees) {
+    try {
+      await isapi.enrollEmployee(target, {
+        employeeCode: employee.employeeCode,
+        fullName: employee.fullName,
+        cardNumber: employee.cardNumber,
+        photoUrl: employee.photoUrl,
+      });
+      await prisma.deviceEmployeeSync.upsert({
         where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
         create: { deviceId: device.id, employeeId: employee.id, status: "SYNCED", syncedAt: new Date() },
         update: { status: "SYNCED", syncedAt: new Date(), errorMessage: null },
-      }),
-    ),
-  );
+      });
+      succeeded += 1;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn(`Hikvision sync failed for employee ${employee.id} on device ${id}: ${errorMessage}`);
+      await prisma.deviceEmployeeSync.upsert({
+        where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
+        create: { deviceId: device.id, employeeId: employee.id, status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
+        update: { status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
+      });
+      failed += 1;
+    }
+  }
 
-  await recordAuditLog({ organizationId, action: "DEVICE_SYNC", entityType: "Device", entityId: id, metadata: { employeeCount: results.length } });
+  await recordAuditLog({
+    organizationId,
+    action: "DEVICE_SYNC",
+    entityType: "Device",
+    entityId: id,
+    metadata: { employeeCount: employees.length, succeeded, failed, simulated: false },
+  });
 
   return {
-    simulated: true,
-    message: "Haqiqiy vendor protokoli hali ulanmagan — sinxronizatsiya simulyatsiya qilindi (real qurilmada test qilinmagan).",
-    syncedCount: results.length,
+    simulated: false,
+    message: `Haqiqiy ISAPI sinxronizatsiya yakunlandi: ${succeeded} muvaffaqiyatli, ${failed} xato.`,
+    syncedCount: succeeded,
+    failedCount: failed,
   };
 }
 
@@ -129,12 +233,7 @@ export async function listEmployeesToSync(organizationId: string, deviceId: stri
   await getOwnedDevice(organizationId, deviceId);
 
   return prisma.employee.findMany({
-    where: {
-      organizationId,
-      deletedAt: null,
-      status: "ACTIVE",
-      OR: [{ photoUrl: { not: null } }, { cardNumber: { not: null } }, { pinCodeHash: { not: null } }],
-    },
+    where: eligibleEmployeesWhere(organizationId),
     select: { id: true, employeeCode: true, fullName: true, cardNumber: true, photoUrl: true },
   });
 }
