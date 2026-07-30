@@ -7,6 +7,7 @@ import { logger } from "../../config/logger";
 import { encryptSecret, decryptSecret } from "../../common/secret-crypto";
 import { CreateDeviceDto, UpdateDeviceDto } from "./device.dto";
 import * as isapi from "./hikvision-isapi";
+import { createEmployee } from "../employee/employee.service";
 
 /** Never return the encrypted password; expose only whether one is configured. */
 function sanitizeDevice<T extends Partial<Device>>(device: T): Omit<T, "isapiPasswordEnc"> & { hasIsapiCredentials: boolean } {
@@ -349,6 +350,22 @@ export async function listDeviceUsers(organizationId: string, deviceId: string) 
     deviceName: u.name,
     matchedEmployee: employeeByCode.get(u.personId) ?? null,
   }));
+}
+
+/**
+ * Creates a bare FaceHub employee (employeeCode = the device's Person ID) for
+ * a person that already exists on the device but has no matching site
+ * record — the "pull" half of the reconciliation shown by listDeviceUsers().
+ * Only employeeCode/fullName are known from the device; the admin fills in
+ * department/position/etc. afterward via the normal employee edit form.
+ */
+export async function importDeviceUser(organizationId: string, deviceId: string, personId: string, name?: string) {
+  await getOwnedDevice(organizationId, deviceId);
+  const existing = await prisma.employee.findFirst({ where: { organizationId, employeeCode: personId, deletedAt: null } });
+  if (existing) {
+    throw ApiError.conflict(`"${personId}" kodli xodim allaqachon mavjud`);
+  }
+  return createEmployee(organizationId, { employeeCode: personId, fullName: name?.trim() || personId });
 }
 
 export async function listDeviceSyncs(organizationId: string, deviceId: string) {

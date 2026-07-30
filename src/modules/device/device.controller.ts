@@ -63,6 +63,11 @@ export const listDeviceUsersHandler = asyncHandler(async (req: Request, res: Res
   sendSuccess(res, users);
 });
 
+export const importDeviceUserHandler = asyncHandler(async (req: Request, res: Response) => {
+  const employee = await deviceService.importDeviceUser(req.tenantId!, req.params.id, req.params.personId, req.body.name);
+  sendCreated(res, employee);
+});
+
 export const ackEmployeeSyncHandler = asyncHandler(async (req: Request, res: Response) => {
   const { status, errorMessage } = req.body;
   const result = await deviceService.ackEmployeeSync(

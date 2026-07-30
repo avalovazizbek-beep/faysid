@@ -10,6 +10,8 @@ import {
   createDeviceSchema,
   deviceEmployeeSyncParamSchema,
   deviceIdParamSchema,
+  deviceUserParamSchema,
+  importDeviceUserSchema,
   updateDeviceSchema,
 } from "./device.dto";
 import {
@@ -18,6 +20,7 @@ import {
   deleteDeviceHandler,
   getDeviceHandler,
   heartbeatDeviceHandler,
+  importDeviceUserHandler,
   listDeviceSyncsHandler,
   listDevicesHandler,
   listDeviceUsersHandler,
@@ -127,6 +130,22 @@ router.get("/:id/employees-to-sync", validate({ params: deviceIdParamSchema }), 
  *       200: { description: Device Person IDs with matched employee (if any) }
  */
 router.get("/:id/device-users", validate({ params: deviceIdParamSchema }), listDeviceUsersHandler);
+
+/**
+ * @openapi
+ * /devices/{id}/device-users/{personId}/import:
+ *   post:
+ *     summary: Create a bare FaceHub employee (employeeCode = personId) for a device person with no matching site record
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       201: { description: Employee created }
+ */
+router.post(
+  "/:id/device-users/:personId/import",
+  validate({ params: deviceUserParamSchema, body: importDeviceUserSchema }),
+  importDeviceUserHandler,
+);
 
 /**
  * @openapi

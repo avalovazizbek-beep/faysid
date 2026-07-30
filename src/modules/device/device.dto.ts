@@ -44,3 +44,13 @@ export const ackEmployeeSyncSchema = z.object({
   errorMessage: z.string().max(1000).optional(),
 });
 export type AckEmployeeSyncDto = z.infer<typeof ackEmployeeSyncSchema>;
+
+export const deviceUserParamSchema = z.object({
+  id: z.string().uuid(),
+  personId: z.string().min(1).max(50),
+});
+
+export const importDeviceUserSchema = z.object({
+  name: z.string().max(200).optional(),
+});
+export type ImportDeviceUserDto = z.infer<typeof importDeviceUserSchema>;
