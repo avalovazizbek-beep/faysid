@@ -361,10 +361,10 @@ export async function listDeviceUsers(organizationId: string, deviceId: string) 
  */
 export async function importDeviceUser(organizationId: string, deviceId: string, personId: string, name?: string) {
   await getOwnedDevice(organizationId, deviceId);
-  const existing = await prisma.employee.findFirst({ where: { organizationId, employeeCode: personId, deletedAt: null } });
-  if (existing) {
-    throw ApiError.conflict(`"${personId}" kodli xodim allaqachon mavjud`);
-  }
+  // createEmployee() itself checks for a duplicate employeeCode (including
+  // ones used by a previously soft-deleted employee, which still block reuse
+  // at the DB level) and throws a friendly ApiError — no need to duplicate
+  // that check here.
   return createEmployee(organizationId, { employeeCode: personId, fullName: name?.trim() || personId });
 }
 

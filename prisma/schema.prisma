@@ -479,7 +479,7 @@ model DeviceEmployeeSync {
   employeeId   String
   status       DeviceSyncStatus @default(PENDING)
   syncedAt     DateTime?
-  errorMessage String?
+  errorMessage String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

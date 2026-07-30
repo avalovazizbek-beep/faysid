@@ -33,11 +33,19 @@ async function assertShiftBelongsToOrg(organizationId: string, shiftId: string) 
 }
 
 export async function createEmployee(organizationId: string, dto: CreateEmployeeDto, photoUrl?: string) {
+  // The DB unique constraint is on (organizationId, employeeCode) regardless
+  // of soft-delete status — a deleted employee's code still blocks reuse at
+  // the database level, so this check must look at all rows, not just active
+  // ones, or the conflict below surfaces as an unhandled Prisma error instead.
   const existing = await prisma.employee.findFirst({
-    where: { organizationId, employeeCode: dto.employeeCode, deletedAt: null },
+    where: { organizationId, employeeCode: dto.employeeCode },
   });
   if (existing) {
-    throw ApiError.conflict(`Employee code "${dto.employeeCode}" already exists`);
+    throw ApiError.conflict(
+      existing.deletedAt
+        ? `Employee code "${dto.employeeCode}" was used by a previously deleted employee — choose a different code`
+        : `Employee code "${dto.employeeCode}" already exists`,
+    );
   }
 
   if (dto.departmentId) await assertDepartmentBelongsToOrg(organizationId, dto.departmentId);
@@ -203,7 +211,7 @@ export async function importEmployeesFromCsv(organizationId: string, csvText: st
       }
 
       const existing = await prisma.employee.findFirst({
-        where: { organizationId, employeeCode, deletedAt: null },
+        where: { organizationId, employeeCode },
       });
       if (existing) {
         throw new Error(`Employee code "${employeeCode}" allaqachon mavjud`);
