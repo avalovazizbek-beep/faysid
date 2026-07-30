@@ -219,6 +219,78 @@ export async function sync(organizationId: string, id: string) {
   };
 }
 
+/**
+ * Pushes one employee to every ISAPI-credentialed Hikvision device in the
+ * organization — the "bind to device" action for when you just added/edited
+ * one employee and don't want to resync everyone. The device's Person ID
+ * ends up equal to employeeCode (see hikvision-isapi.enrollEmployee), which
+ * is also the key the webhook matches incoming events against — so once
+ * pushed, showing this employee's face at the device produces a real
+ * attendance event with no separate device-side employee management needed.
+ */
+export async function pushEmployeeToDevices(organizationId: string, employeeId: string) {
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, organizationId, deletedAt: null } });
+  if (!employee) {
+    throw ApiError.notFound("Employee not found");
+  }
+
+  const devices = await prisma.device.findMany({
+    where: { organizationId, deletedAt: null, vendor: "HIKVISION", isapiUsername: { not: null }, isapiPasswordEnc: { not: null } },
+  });
+
+  if (devices.length === 0) {
+    return {
+      pushed: 0,
+      results: [],
+      message: "ISAPI login/parol sozlangan Hikvision qurilma topilmadi. Avval 'Qurilmalar' sahifasida qurilmaga ISAPI login/parol kiriting.",
+    };
+  }
+
+  const results: { deviceId: string; deviceName: string; success: boolean; error?: string }[] = [];
+  for (const device of devices) {
+    const target = isapiTarget(device);
+    if (!target) continue;
+    try {
+      await isapi.enrollEmployee(target, {
+        employeeCode: employee.employeeCode,
+        fullName: employee.fullName,
+        cardNumber: employee.cardNumber,
+        photoUrl: employee.photoUrl,
+      });
+      await prisma.deviceEmployeeSync.upsert({
+        where: { deviceId_employeeId: { deviceId: device.id, employeeId } },
+        create: { deviceId: device.id, employeeId, status: "SYNCED", syncedAt: new Date() },
+        update: { status: "SYNCED", syncedAt: new Date(), errorMessage: null },
+      });
+      results.push({ deviceId: device.id, deviceName: device.name, success: true });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn(`Push-to-device failed for employee ${employeeId} on device ${device.id}: ${errorMessage}`);
+      await prisma.deviceEmployeeSync.upsert({
+        where: { deviceId_employeeId: { deviceId: device.id, employeeId } },
+        create: { deviceId: device.id, employeeId, status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
+        update: { status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
+      });
+      results.push({ deviceId: device.id, deviceName: device.name, success: false, error: errorMessage.slice(0, 500) });
+    }
+  }
+
+  const succeeded = results.filter((r) => r.success).length;
+  await recordAuditLog({
+    organizationId,
+    action: "DEVICE_EMPLOYEE_PUSH",
+    entityType: "Employee",
+    entityId: employeeId,
+    metadata: { deviceCount: devices.length, succeeded },
+  });
+
+  return {
+    pushed: succeeded,
+    results,
+    message: `${succeeded}/${devices.length} qurilmaga muvaffaqiyatli yuborildi.`,
+  };
+}
+
 export async function listDeviceSyncs(organizationId: string, deviceId: string) {
   await getOwnedDevice(organizationId, deviceId);
   return prisma.deviceEmployeeSync.findMany({

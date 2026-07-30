@@ -3,6 +3,7 @@ import { asyncHandler } from "../../common/async-handler";
 import { ApiError } from "../../common/api-error";
 import { sendCreated, sendSuccess } from "../../common/api-response";
 import * as employeeService from "./employee.service";
+import { pushEmployeeToDevices } from "../device/device.service";
 
 function photoUrlFor(req: Request): string | undefined {
   return req.file ? `/uploads/employees/${req.file.filename}` : undefined;
@@ -46,4 +47,9 @@ export const importEmployeesHandler = asyncHandler(async (req: Request, res: Res
   }
   const results = await employeeService.importEmployeesFromCsv(req.tenantId!, req.file.buffer.toString("utf-8"));
   sendSuccess(res, results);
+});
+
+export const pushEmployeeToDeviceHandler = asyncHandler(async (req: Request, res: Response) => {
+  const result = await pushEmployeeToDevices(req.tenantId!, req.params.id);
+  sendSuccess(res, result);
 });

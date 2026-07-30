@@ -19,6 +19,7 @@ import {
   getEmployeeHandler,
   importEmployeesHandler,
   listEmployeesHandler,
+  pushEmployeeToDeviceHandler,
   updateEmployeeHandler,
 } from "./employee.controller";
 
@@ -83,5 +84,17 @@ router.patch(
   updateEmployeeHandler,
 );
 router.delete("/:id", validate({ params: employeeIdParamSchema }), deleteEmployeeHandler);
+
+/**
+ * @openapi
+ * /employees/{id}/push-to-device:
+ *   post:
+ *     summary: Push this employee (name/card/photo) to every ISAPI-credentialed Hikvision device in the organization
+ *     tags: [Employees]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Per-device push result }
+ */
+router.post("/:id/push-to-device", validate({ params: employeeIdParamSchema }), pushEmployeeToDeviceHandler);
 
 export default router;
