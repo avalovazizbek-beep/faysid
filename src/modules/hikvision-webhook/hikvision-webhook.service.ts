@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma";
 import { logger } from "../../config/logger";
+import { recordAuditLog } from "../../common/audit-log";
 import { checkIn, checkOut } from "../attendance/attendance.service";
 
 /**
@@ -91,10 +92,21 @@ export async function processHikvisionEvent(body: Record<string, unknown>, files
 
   if (!device) {
     logger.warn(`Hikvision webhook: could not match any device for identifiers ${JSON.stringify(parsed.deviceIdentifiers)}`);
+    await recordAuditLog({
+      action: "DEVICE_WEBHOOK_UNMATCHED_DEVICE",
+      metadata: { identifiers: parsed.deviceIdentifiers, raw: JSON.stringify(raw).slice(0, 1000) },
+    });
     return;
   }
 
   await prisma.device.update({ where: { id: device.id }, data: { status: "ONLINE", lastSeenAt: new Date() } });
+  await recordAuditLog({
+    organizationId: device.organizationId,
+    action: "DEVICE_WEBHOOK_RECEIVED",
+    entityType: "Device",
+    entityId: device.id,
+    metadata: { employeeNo: parsed.employeeNo, attendanceStatus: parsed.attendanceStatus },
+  });
 
   if (!parsed.employeeNo) {
     logger.warn(`Hikvision webhook: event from device ${device.id} has no employee identifier — ${JSON.stringify(raw).slice(0, 500)}`);
@@ -113,6 +125,13 @@ export async function processHikvisionEvent(body: Record<string, unknown>, files
     logger.warn(
       `Hikvision webhook: no employee matches device ID "${parsed.employeeNo}" in organization ${device.organizationId}`,
     );
+    await recordAuditLog({
+      organizationId: device.organizationId,
+      action: "DEVICE_WEBHOOK_UNMATCHED_EMPLOYEE",
+      entityType: "Device",
+      entityId: device.id,
+      metadata: { employeeNo: parsed.employeeNo },
+    });
     return;
   }
 
@@ -123,9 +142,21 @@ export async function processHikvisionEvent(body: Record<string, unknown>, files
     if (isCheckOut) {
       await checkOut(device.organizationId, { employeeId: employee.id });
       logger.info(`Hikvision webhook: recorded check-out for employee ${employee.id} via device ${device.id}`);
+      await recordAuditLog({
+        organizationId: device.organizationId,
+        action: "DEVICE_WEBHOOK_CHECKOUT",
+        entityType: "Employee",
+        entityId: employee.id,
+      });
     } else if (isCheckIn) {
       await checkIn(device.organizationId, { employeeId: employee.id, type: "FACE" });
       logger.info(`Hikvision webhook: recorded check-in for employee ${employee.id} via device ${device.id}`);
+      await recordAuditLog({
+        organizationId: device.organizationId,
+        action: "DEVICE_WEBHOOK_CHECKIN",
+        entityType: "Employee",
+        entityId: employee.id,
+      });
     } else {
       logger.warn(`Hikvision webhook: unrecognized attendanceStatus "${parsed.attendanceStatus}" — event logged, no action taken`);
     }
