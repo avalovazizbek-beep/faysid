@@ -168,6 +168,70 @@ async function digestRequest(
   return { status: secondResponse.status, text: secondText };
 }
 
+export interface HikvisionAttendanceEvent {
+  employeeNo: string;
+  time: string;
+  attendanceStatus: string;
+}
+
+/**
+ * Polls the device's own access-control event log (AcsEvent) for real
+ * attendance events — the fallback path for when the device's HTTP Listening
+ * push (the webhook) never actually fires. Paginates in batches of 30 like
+ * searchDeviceUsers. Exact field names (attendanceStatus values, etc.) are
+ * the standard Hikvision shape but unconfirmed against this specific
+ * firmware until a real event is seen — adjust here if needed.
+ */
+export async function searchAcsEvents(
+  device: HikvisionDeviceTarget,
+  startTime: Date,
+  endTime: Date,
+): Promise<HikvisionAttendanceEvent[]> {
+  const events: HikvisionAttendanceEvent[] = [];
+  let position = 0;
+  const pageSize = 30;
+
+  for (;;) {
+    const body = JSON.stringify({
+      AcsEventCond: {
+        searchID: "1",
+        searchResultPosition: position,
+        maxResults: pageSize,
+        major: 0,
+        minor: 0,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+      },
+    });
+    const { status, text } = await digestRequest(
+      device,
+      "POST",
+      "/ISAPI/AccessControl/AcsEvent?format=json",
+      body,
+      "application/json",
+    );
+    if (status !== 200) {
+      throw new HikvisionIsapiError(`AcsEvent search failed (${status}): ${text.slice(0, 500)}`, status, text);
+    }
+
+    const parsed = JSON.parse(text) as {
+      AcsEvent?: { InfoList?: { employeeNoString?: string; time?: string; attendanceStatus?: string }[] };
+    };
+    const page = parsed.AcsEvent?.InfoList ?? [];
+    for (const e of page) {
+      if (e.employeeNoString && e.time) {
+        events.push({ employeeNo: e.employeeNoString, time: e.time, attendanceStatus: e.attendanceStatus ?? "" });
+      }
+    }
+
+    if (page.length < pageSize) break;
+    position += pageSize;
+    if (position > 3000) break; // safety cap
+  }
+
+  return events;
+}
+
 /** Real remote reboot — standard Hikvision ISAPI endpoint, no request body. */
 export async function rebootDevice(device: HikvisionDeviceTarget): Promise<void> {
   const { status, text } = await digestRequest(device, "PUT", "/ISAPI/System/reboot");
