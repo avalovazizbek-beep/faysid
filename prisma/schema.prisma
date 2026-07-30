@@ -105,29 +105,89 @@ model Organization {
   licenseExpiresAt DateTime?
   telegramChatId   String?
 
+  // Per-organization Telegram bot for the employee self-registration flow
+  // (distinct from telegramChatId above, which is only the daily-report
+  // destination). Token is AES-256-GCM encrypted at rest — see
+  // common/secret-crypto.ts. webhookSecret is compared against Telegram's
+  // X-Telegram-Bot-Api-Secret-Token header to reject spoofed webhook calls.
+  telegramBotTokenEnc          String?
+  telegramWebhookSecret        String?
+  telegramRegistrationCode     String?
+  telegramRegistrationCodeDate DateTime? @db.Date
+
   settings Json?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  owner       User?        @relation("OrganizationOwner", fields: [ownerId], references: [id])
-  users       User[]       @relation("OrganizationUsers")
-  licenses    License[]
-  roles       Role[]
-  auditLogs   AuditLog[]
-  departments Department[]
-  employees   Employee[]
-  shifts      Shift[]
-  attendances Attendance[]
-  devices     Device[]
-  leaves      Leave[]
-  payrolls    Payroll[]
-  holidays    Holiday[]
+  owner                User?                       @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  users                User[]                      @relation("OrganizationUsers")
+  licenses             License[]
+  roles                Role[]
+  auditLogs            AuditLog[]
+  departments          Department[]
+  employees            Employee[]
+  shifts               Shift[]
+  attendances          Attendance[]
+  devices              Device[]
+  leaves               Leave[]
+  payrolls             Payroll[]
+  holidays             Holiday[]
+  employeeApplications EmployeeApplication[]
 
   @@index([status])
   @@index([package])
   @@map("organizations")
+}
+
+model EmployeeApplication {
+  id               String            @id @default(uuid())
+  organizationId   String
+  fullName         String
+  phone            String?
+  photoUrl         String?
+  telegramUserId   String
+  telegramChatId   String
+  telegramUsername String?
+  status           ApplicationStatus @default(PENDING)
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("employee_applications")
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Transient conversation state for the Telegram onboarding bot — one row per
+// active chat, deleted once the application is submitted or cancelled.
+model TelegramOnboardingSession {
+  id                String   @id @default(uuid())
+  organizationId    String
+  chatId            String
+  step              String
+  phone             String?
+  fullName          String?
+  photoFileId       String?
+  telegramUserId    String?
+  telegramUsername  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, chatId])
+  @@map("telegram_onboarding_sessions")
 }
 
 model License {

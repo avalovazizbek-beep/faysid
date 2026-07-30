@@ -17,6 +17,7 @@ import reportRoutes from "../modules/reports/report.routes";
 import holidayRoutes from "../modules/holiday/holiday.routes";
 import calendarRoutes from "../modules/calendar/calendar.routes";
 import orgSettingsRoutes from "../modules/org-settings/org-settings.routes";
+import employeeApplicationRoutes from "../modules/employee-applications/employee-application.routes";
 
 const router = Router();
 
@@ -42,5 +43,6 @@ router.use("/reports", reportRoutes);
 router.use("/holidays", holidayRoutes);
 router.use("/calendar", calendarRoutes);
 router.use("/org/settings", orgSettingsRoutes);
+router.use("/employee-applications", employeeApplicationRoutes);
 
 export default router;

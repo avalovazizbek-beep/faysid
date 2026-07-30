@@ -9,6 +9,7 @@ import { startLicenseExpiryCron } from "./jobs/license-expiry.job";
 import { startDeviceOfflineCron } from "./jobs/device-offline.job";
 import { startDailyReportCron } from "./jobs/daily-report.job";
 import { startHikvisionPollCron } from "./jobs/hikvision-poll.job";
+import { startTelegramRegistrationCodeCron } from "./jobs/telegram-registration-code.job";
 
 async function bootstrap(): Promise<void> {
   await prisma.$connect();
@@ -25,6 +26,7 @@ async function bootstrap(): Promise<void> {
   startDeviceOfflineCron();
   startDailyReportCron();
   startHikvisionPollCron();
+  startTelegramRegistrationCodeCron();
 
   const app = createApp();
   const httpServer = createServer(app);

@@ -32,6 +32,12 @@ const envSchema = z.object({
   // Daily attendance report delivery. Optional: if unset, the daily-report cron
   // logs a warning and skips sending instead of failing.
   TELEGRAM_BOT_TOKEN: z.string().optional(),
+
+  // Publicly reachable base URL for this deployment (e.g.
+  // "https://tyutorkpi.sies.uz/faysid"), used to register each organization's
+  // Telegram onboarding-bot webhook. Optional: without it, saving a bot token
+  // still works but the webhook can't be auto-registered.
+  PUBLIC_BASE_URL: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

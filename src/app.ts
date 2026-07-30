@@ -13,6 +13,7 @@ import { errorHandler, notFoundHandler } from "./middlewares/error-handler";
 import { swaggerSpec } from "./docs/swagger";
 import routes from "./routes";
 import hikvisionWebhookRoutes from "./modules/hikvision-webhook/hikvision-webhook.routes";
+import telegramOnboardingRoutes from "./modules/telegram-onboarding/telegram-onboarding.routes";
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
 
@@ -29,7 +30,13 @@ const BASE_PATH = env.API_PREFIX.replace(/\/api\/v1$/, "");
 // this is a no-op.
 const FRONTEND_DIST = path.join(__dirname, "..", "public");
 const SERVE_FRONTEND = existsSync(FRONTEND_DIST);
-const RESERVED_PREFIXES = [env.API_PREFIX, `${BASE_PATH}/uploads`, `${BASE_PATH}/api/hikvision/event`, "/api/docs"];
+const RESERVED_PREFIXES = [
+  env.API_PREFIX,
+  `${BASE_PATH}/uploads`,
+  `${BASE_PATH}/api/hikvision/event`,
+  `${BASE_PATH}/api/telegram-webhook`,
+  "/api/docs",
+];
 
 export function createApp(): Application {
   const app = express();
@@ -77,6 +84,7 @@ export function createApp(): Application {
   // settings, called directly by the device (no auth, not a browser, and it may
   // fire in bursts) rather than through our normal API surface.
   app.use(`${BASE_PATH}/api/hikvision/event`, hikvisionWebhookRoutes);
+  app.use(`${BASE_PATH}/api/telegram-webhook`, telegramOnboardingRoutes);
 
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
