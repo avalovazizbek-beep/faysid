@@ -86,6 +86,45 @@ function buildDigestAuthHeader(
  * project's existing pattern of raw fetch for external HTTP integrations
  * (see common/telegram.ts).
  */
+/**
+ * Hikvision locks the admin account for a cooldown period after repeated
+ * failed logins (its own brute-force protection — see the <lockStatus>lock
+ * </lockStatus> / <unlockTime> XML it returns on 401). Without this, our
+ * 30s connectivity-poll cron would keep hammering a locked account forever,
+ * which risks resetting/extending the device's own lockout timer instead of
+ * ever letting it recover. Keyed by ip:port, in-memory only (worst case
+ * after a process restart is one extra wasted attempt, not a real problem).
+ */
+const lockouts = new Map<string, { until: number }>();
+
+function deviceKey(device: HikvisionDeviceTarget): string {
+  return `${device.ipAddress}:${device.port}`;
+}
+
+function assertNotLockedOut(device: HikvisionDeviceTarget): void {
+  const entry = lockouts.get(deviceKey(device));
+  if (entry && entry.until > Date.now()) {
+    const remaining = Math.ceil((entry.until - Date.now()) / 1000);
+    throw new HikvisionIsapiError(`Device account is locked out (Hikvision brute-force protection) — retry in ${remaining}s`, 401);
+  }
+}
+
+function recordAuthResult(device: HikvisionDeviceTarget, status: number, text: string): void {
+  const key = deviceKey(device);
+  if (status !== 401) {
+    lockouts.delete(key);
+    return;
+  }
+  const unlockMatch = /<lockStatus>lock<\/lockStatus>[\s\S]*?<unlockTime>(\d+)<\/unlockTime>/.exec(text);
+  if (unlockMatch) {
+    lockouts.set(key, { until: Date.now() + Number(unlockMatch[1]) * 1000 });
+  } else {
+    // Plain wrong-credentials 401 (no device-reported lock) — still back off
+    // briefly so a misconfigured device doesn't get hit every 30s forever.
+    lockouts.set(key, { until: Date.now() + 60_000 });
+  }
+}
+
 async function digestRequest(
   device: HikvisionDeviceTarget,
   method: string,
@@ -93,21 +132,29 @@ async function digestRequest(
   body?: RequestInit["body"],
   contentType?: string,
 ): Promise<{ status: number; text: string }> {
+  assertNotLockedOut(device);
+
   const baseUrl = `http://${device.ipAddress}:${device.port}`;
   const url = `${baseUrl}${uriPath}`;
 
   const firstResponse = await fetch(url, { method, body, headers: contentType ? { "Content-Type": contentType } : undefined });
   if (firstResponse.status !== 401) {
-    return { status: firstResponse.status, text: await firstResponse.text() };
+    const text = await firstResponse.text();
+    recordAuthResult(device, firstResponse.status, text);
+    return { status: firstResponse.status, text };
   }
 
   const challengeHeader = firstResponse.headers.get("www-authenticate");
   if (!challengeHeader) {
-    return { status: firstResponse.status, text: await firstResponse.text() };
+    const text = await firstResponse.text();
+    recordAuthResult(device, firstResponse.status, text);
+    return { status: firstResponse.status, text };
   }
   const challenge = parseWwwAuthenticate(challengeHeader);
   if (!challenge) {
-    return { status: firstResponse.status, text: await firstResponse.text() };
+    const text = await firstResponse.text();
+    recordAuthResult(device, firstResponse.status, text);
+    return { status: firstResponse.status, text };
   }
 
   const authHeader = buildDigestAuthHeader(challenge, method, uriPath, device.isapiUsername, device.isapiPassword);
@@ -116,7 +163,9 @@ async function digestRequest(
     body,
     headers: { Authorization: authHeader, ...(contentType ? { "Content-Type": contentType } : {}) },
   });
-  return { status: secondResponse.status, text: await secondResponse.text() };
+  const secondText = await secondResponse.text();
+  recordAuthResult(device, secondResponse.status, secondText);
+  return { status: secondResponse.status, text: secondText };
 }
 
 /** Connectivity + credential check — used for real online/offline status. */
