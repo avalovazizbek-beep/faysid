@@ -118,19 +118,36 @@ export async function reconnect(organizationId: string, id: string) {
 
 /** Simulated — no vendor SDK available to actually restart hardware. */
 export async function restart(organizationId: string, id: string, actorUserId?: string) {
-  await getOwnedDevice(organizationId, id);
+  const device = await getOwnedDevice(organizationId, id);
+  const target = isapiTarget(device);
 
+  if (!target) {
+    await recordAuditLog({
+      organizationId,
+      userId: actorUserId,
+      action: "DEVICE_RESTART_REQUESTED",
+      entityType: "Device",
+      entityId: id,
+      metadata: { simulated: true },
+    });
+    return {
+      simulated: true,
+      message: "ISAPI login/parol sozlanmagan — bu amal simulyatsiya qilindi. Qurilmaga ISAPI login/parol kiriting.",
+    };
+  }
+
+  await isapi.rebootDevice(target);
   await recordAuditLog({
     organizationId,
     userId: actorUserId,
     action: "DEVICE_RESTART_REQUESTED",
     entityType: "Device",
     entityId: id,
+    metadata: { simulated: false },
   });
-
   return {
-    simulated: true,
-    message: "Vendor SDK ulanmagan — bu amal hozircha simulyatsiya qilindi. Haqiqiy qurilma bilan ishlash uchun vendor SDK integratsiyasi kerak.",
+    simulated: false,
+    message: "Qurilmaga real qayta ishga tushirish buyrug'i yuborildi.",
   };
 }
 

@@ -168,6 +168,14 @@ async function digestRequest(
   return { status: secondResponse.status, text: secondText };
 }
 
+/** Real remote reboot — standard Hikvision ISAPI endpoint, no request body. */
+export async function rebootDevice(device: HikvisionDeviceTarget): Promise<void> {
+  const { status, text } = await digestRequest(device, "PUT", "/ISAPI/System/reboot");
+  if (status !== 200) {
+    throw new HikvisionIsapiError(`reboot request failed with status ${status}`, status, text.slice(0, 500));
+  }
+}
+
 /** Connectivity + credential check — used for real online/offline status. */
 export async function fetchDeviceInfo(device: HikvisionDeviceTarget): Promise<{ deviceName?: string; serialNumber?: string }> {
   const { status, text } = await digestRequest(device, "GET", "/ISAPI/System/deviceInfo?format=json");
