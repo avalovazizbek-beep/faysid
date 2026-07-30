@@ -1,4 +1,7 @@
 import { connect } from "node:net";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { Device } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../common/api-error";
@@ -360,12 +363,30 @@ export async function listDeviceUsers(organizationId: string, deviceId: string) 
  * department/position/etc. afterward via the normal employee edit form.
  */
 export async function importDeviceUser(organizationId: string, deviceId: string, personId: string, name?: string) {
-  await getOwnedDevice(organizationId, deviceId);
+  const device = await getOwnedDevice(organizationId, deviceId);
+  const target = isapiTarget(device);
+
+  let photoUrl: string | undefined;
+  if (target) {
+    try {
+      const photoBuffer = await isapi.fetchDevicePersonPhoto(target, personId);
+      if (photoBuffer) {
+        const dir = path.join(__dirname, "..", "..", "..", "uploads", "employees");
+        mkdirSync(dir, { recursive: true });
+        const filename = `${randomUUID()}.jpg`;
+        writeFileSync(path.join(dir, filename), photoBuffer);
+        photoUrl = `/uploads/employees/${filename}`;
+      }
+    } catch (error) {
+      logger.warn(`Could not fetch device photo for person ${personId}: ${error}`);
+    }
+  }
+
   // createEmployee() itself checks for a duplicate employeeCode (including
   // ones used by a previously soft-deleted employee, which still block reuse
   // at the DB level) and throws a friendly ApiError — no need to duplicate
   // that check here.
-  return createEmployee(organizationId, { employeeCode: personId, fullName: name?.trim() || personId });
+  return createEmployee(organizationId, { employeeCode: personId, fullName: name?.trim() || personId }, photoUrl);
 }
 
 export async function listDeviceSyncs(organizationId: string, deviceId: string) {

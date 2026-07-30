@@ -328,6 +328,49 @@ export async function searchDeviceUsers(device: HikvisionDeviceTarget): Promise<
   return users;
 }
 
+/**
+ * Pulls a person's enrolled face photo back off the device — the read-side
+ * counterpart of the FaceDataRecord upload in enrollEmployee(). Hikvision's
+ * face-library search response shape (a "picUri" to fetch separately vs. an
+ * inline base64 blob) varies by firmware and isn't confirmed against this
+ * specific device yet; this handles both known shapes and returns null
+ * (rather than throwing) on anything unexpected, since a missing photo
+ * should never block importing the person themselves.
+ */
+export async function fetchDevicePersonPhoto(device: HikvisionDeviceTarget, personId: string): Promise<Buffer | null> {
+  try {
+    const body = JSON.stringify({
+      FaceInfoSearchCond: { searchID: "1", searchResultPosition: 0, maxResults: 1, faceLibType: "blackFD", FDID: "1", FPID: personId },
+    });
+    const { status, text } = await digestRequest(
+      device,
+      "POST",
+      "/ISAPI/Intelligent/FDLib/FDSearch?format=json",
+      body,
+      "application/json",
+    );
+    if (status !== 200) {
+      logger.warn(`Hikvision FDSearch failed for person ${personId} (${status}): ${text.slice(0, 300)}`);
+      return null;
+    }
+
+    const parsed = JSON.parse(text) as {
+      FaceInfoSearch?: { MatchList?: { FPID?: string; data?: string }[] };
+    };
+    const match = parsed.FaceInfoSearch?.MatchList?.[0];
+    // Only the inline-base64 shape is supported — digestRequest() reads
+    // responses as text, which would corrupt a binary image fetched from a
+    // separate picture URL. If this firmware uses that shape instead, this
+    // returns null (no photo) rather than saving corrupted image data; the
+    // employee import itself still succeeds without a photo.
+    if (!match?.data) return null;
+    return Buffer.from(match.data, "base64");
+  } catch (error) {
+    logger.warn(`Hikvision FDSearch: could not fetch photo for person ${personId}: ${error}`);
+    return null;
+  }
+}
+
 async function readPhotoBuffer(photoUrl: string): Promise<Buffer | null> {
   try {
     // photoUrl is always "/uploads/employees/<file>" (see middlewares/upload.ts)
