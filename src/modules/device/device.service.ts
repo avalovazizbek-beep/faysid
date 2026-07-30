@@ -136,7 +136,14 @@ export async function restart(organizationId: string, id: string, actorUserId?: 
     };
   }
 
-  await isapi.rebootDevice(target);
+  try {
+    await isapi.rebootDevice(target);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.warn(`Device restart failed for device ${id}: ${errorMessage}`);
+    throw new ApiError(502, `Qurilmaga ulanib bo'lmadi: ${errorMessage}`);
+  }
+
   await recordAuditLog({
     organizationId,
     userId: actorUserId,
@@ -322,7 +329,15 @@ export async function listDeviceUsers(organizationId: string, deviceId: string) 
     throw ApiError.badRequest("Bu qurilmada ISAPI login/parol sozlanmagan");
   }
 
-  const deviceUsers = await isapi.searchDeviceUsers(target);
+  let deviceUsers: isapi.HikvisionDeviceUser[];
+  try {
+    deviceUsers = await isapi.searchDeviceUsers(target);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.warn(`listDeviceUsers failed for device ${deviceId}: ${errorMessage}`);
+    throw new ApiError(502, `Qurilmaga ulanib bo'lmadi: ${errorMessage}`);
+  }
+
   const employees = await prisma.employee.findMany({
     where: { organizationId, deletedAt: null, employeeCode: { in: deviceUsers.map((u) => u.personId) } },
     select: { id: true, employeeCode: true, fullName: true },
