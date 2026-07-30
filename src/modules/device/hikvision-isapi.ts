@@ -133,6 +133,53 @@ export async function fetchDeviceInfo(device: HikvisionDeviceTarget): Promise<{ 
   }
 }
 
+export interface HikvisionDeviceUser {
+  personId: string;
+  name: string;
+}
+
+/**
+ * Pulls the device's own enrolled person list (its "User" management page) —
+ * used to reconcile against FaceHub's employees so an admin can see which
+ * device Person IDs already have a matching employeeCode and which don't.
+ * Paginates in batches of 30 since some firmware caps maxResults per call.
+ */
+export async function searchDeviceUsers(device: HikvisionDeviceTarget): Promise<HikvisionDeviceUser[]> {
+  const users: HikvisionDeviceUser[] = [];
+  let position = 0;
+  const pageSize = 30;
+
+  for (;;) {
+    const body = JSON.stringify({
+      UserInfoSearchCond: { searchID: "1", searchResultPosition: position, maxResults: pageSize },
+    });
+    const { status, text } = await digestRequest(
+      device,
+      "POST",
+      "/ISAPI/AccessControl/UserInfo/Search?format=json",
+      body,
+      "application/json",
+    );
+    if (status !== 200) {
+      throw new HikvisionIsapiError(`UserInfo/Search failed (${status}): ${text.slice(0, 500)}`, status, text);
+    }
+
+    const parsed = JSON.parse(text) as {
+      UserInfoSearch?: { UserInfo?: { employeeNo?: string; name?: string }[]; responseStatusStrg?: string };
+    };
+    const page = parsed.UserInfoSearch?.UserInfo ?? [];
+    for (const u of page) {
+      if (u.employeeNo) users.push({ personId: u.employeeNo, name: u.name ?? "" });
+    }
+
+    if (page.length < pageSize) break;
+    position += pageSize;
+    if (position > 5000) break; // safety cap
+  }
+
+  return users;
+}
+
 async function readPhotoBuffer(photoUrl: string): Promise<Buffer | null> {
   try {
     // photoUrl is always "/uploads/employees/<file>" (see middlewares/upload.ts)

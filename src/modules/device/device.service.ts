@@ -291,6 +291,34 @@ export async function pushEmployeeToDevices(organizationId: string, employeeId: 
   };
 }
 
+/**
+ * Reads the device's own enrolled person list and reconciles it against
+ * FaceHub employees by employeeCode (== the device's Person ID convention),
+ * so an admin can see at a glance which device-side people already have a
+ * matching site employee and which don't — no bulk "import" is needed since
+ * the site is meant to stay the source of truth.
+ */
+export async function listDeviceUsers(organizationId: string, deviceId: string) {
+  const device = await getOwnedDevice(organizationId, deviceId);
+  const target = isapiTarget(device);
+  if (!target) {
+    throw ApiError.badRequest("Bu qurilmada ISAPI login/parol sozlanmagan");
+  }
+
+  const deviceUsers = await isapi.searchDeviceUsers(target);
+  const employees = await prisma.employee.findMany({
+    where: { organizationId, deletedAt: null, employeeCode: { in: deviceUsers.map((u) => u.personId) } },
+    select: { id: true, employeeCode: true, fullName: true },
+  });
+  const employeeByCode = new Map(employees.map((e) => [e.employeeCode, e]));
+
+  return deviceUsers.map((u) => ({
+    personId: u.personId,
+    deviceName: u.name,
+    matchedEmployee: employeeByCode.get(u.personId) ?? null,
+  }));
+}
+
 export async function listDeviceSyncs(organizationId: string, deviceId: string) {
   await getOwnedDevice(organizationId, deviceId);
   return prisma.deviceEmployeeSync.findMany({

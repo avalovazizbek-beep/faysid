@@ -20,6 +20,7 @@ import {
   heartbeatDeviceHandler,
   listDeviceSyncsHandler,
   listDevicesHandler,
+  listDeviceUsersHandler,
   listEmployeesToSyncHandler,
   reconnectDeviceHandler,
   restartDeviceHandler,
@@ -114,6 +115,18 @@ router.get("/:id/syncs", validate({ params: deviceIdParamSchema }), listDeviceSy
  *       200: { description: Employees with photo/card/pin credentials to enroll }
  */
 router.get("/:id/employees-to-sync", validate({ params: deviceIdParamSchema }), listEmployeesToSyncHandler);
+
+/**
+ * @openapi
+ * /devices/{id}/device-users:
+ *   get:
+ *     summary: Real list of the device's own enrolled people (ISAPI), reconciled against employeeCode
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Device Person IDs with matched employee (if any) }
+ */
+router.get("/:id/device-users", validate({ params: deviceIdParamSchema }), listDeviceUsersHandler);
 
 /**
  * @openapi
