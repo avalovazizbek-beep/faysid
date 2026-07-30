@@ -16,7 +16,7 @@ function startOfToday(): Date {
  * employeeNo + attendanceStatus, what happens next is identical.
  */
 export async function recordDeviceAttendanceEvent(
-  device: { id: string; organizationId: string },
+  device: { id: string; organizationId: string; attendanceDirection?: "AUTO" | "CHECK_IN_ONLY" | "CHECK_OUT_ONLY" },
   employeeNo: string,
   attendanceStatus: string,
   source: "webhook" | "poll",
@@ -43,29 +43,40 @@ export async function recordDeviceAttendanceEvent(
     return;
   }
 
-  const status = attendanceStatus.toLowerCase();
-  let isCheckOut = status.includes("out");
-  let isCheckIn = status.includes("in");
+  let isCheckOut: boolean;
+  let isCheckIn: boolean;
 
-  // Many single-door/standalone terminals (no separate entry/exit readers)
-  // never report an explicit direction at all — every verified event looks
-  // identical. When that's the case, infer direction the same way the
-  // manual attendance toggle does: if the employee is currently "inside"
-  // (checked in, not checked out today), this event must be a check-out.
-  if (!isCheckOut && !isCheckIn) {
-    const todayAttendance = await prisma.attendance.findUnique({
-      where: { employeeId_date: { employeeId: employee.id, date: startOfToday() } },
-    });
-    if (todayAttendance?.checkInAt && !todayAttendance.checkOutAt) {
-      isCheckOut = true;
-    } else {
-      isCheckIn = true;
+  if (device.attendanceDirection === "CHECK_IN_ONLY") {
+    isCheckIn = true;
+    isCheckOut = false;
+  } else if (device.attendanceDirection === "CHECK_OUT_ONLY") {
+    isCheckOut = true;
+    isCheckIn = false;
+  } else {
+    const status = attendanceStatus.toLowerCase();
+    isCheckOut = status.includes("out");
+    isCheckIn = status.includes("in");
+
+    // Many single-door/standalone terminals (no separate entry/exit readers)
+    // never report an explicit direction at all — every verified event looks
+    // identical. When that's the case, infer direction the same way the
+    // manual attendance toggle does: if the employee is currently "inside"
+    // (checked in, not checked out today), this event must be a check-out.
+    if (!isCheckOut && !isCheckIn) {
+      const todayAttendance = await prisma.attendance.findUnique({
+        where: { employeeId_date: { employeeId: employee.id, date: startOfToday() } },
+      });
+      if (todayAttendance?.checkInAt && !todayAttendance.checkOutAt) {
+        isCheckOut = true;
+      } else {
+        isCheckIn = true;
+      }
+      logger.info(
+        `Hikvision ${source}: attendanceStatus was empty/unrecognized ("${attendanceStatus}") — inferred ${
+          isCheckOut ? "check-out" : "check-in"
+        } from current session state for employee ${employee.id}`,
+      );
     }
-    logger.info(
-      `Hikvision ${source}: attendanceStatus was empty/unrecognized ("${attendanceStatus}") — inferred ${
-        isCheckOut ? "check-out" : "check-in"
-      } from current session state for employee ${employee.id}`,
-    );
   }
 
   try {

@@ -18,9 +18,15 @@ export interface DailyReportRow {
   note: string;
 }
 
+// .toISOString() renders UTC — the stored instant is correct, but this report
+// displays it raw instead of converting to the org's local (Asia/Tashkent,
+// UTC+5, no DST) wall-clock time, showing e.g. "11:06" for what was actually
+// "16:06" locally.
 function formatTime(value: Date | null | undefined): string | null {
   if (!value) return null;
-  return value.toISOString().slice(11, 16);
+  const tashkent = new Date(value.getTime() + 5 * 60 * 60_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(tashkent.getUTCHours())}:${pad(tashkent.getUTCMinutes())}`;
 }
 
 export async function getDailyAttendanceReport(organizationId: string, date: Date): Promise<DailyReportRow[]> {

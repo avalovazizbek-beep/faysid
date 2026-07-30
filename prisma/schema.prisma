@@ -68,6 +68,15 @@ enum DeviceStatus {
   OFFLINE
 }
 
+/// Fixes a device to always report one direction — for setups with a
+/// separate entry-only and exit-only terminal, where the direction can't
+/// (or shouldn't) be inferred from session state or an ambiguous device event.
+enum DeviceAttendanceDirection {
+  AUTO
+  CHECK_IN_ONLY
+  CHECK_OUT_ONLY
+}
+
 enum DeviceSyncStatus {
   PENDING
   SYNCED
@@ -460,6 +469,8 @@ model Device {
   // Cursor for the ISAPI attendance-polling fallback (jobs/hikvision-attendance-poll.job.ts)
   // — the AcsEvent search window's start time for this device's next poll.
   lastPolledEventAt DateTime?
+
+  attendanceDirection DeviceAttendanceDirection @default(AUTO)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

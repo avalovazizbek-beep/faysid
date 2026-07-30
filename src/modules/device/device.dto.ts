@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DeviceVendor } from "@prisma/client";
+import { DeviceVendor, DeviceAttendanceDirection } from "@prisma/client";
 
 export const createDeviceSchema = z.object({
   name: z.string().min(2).max(150),
@@ -14,6 +14,9 @@ export const createDeviceSchema = z.object({
   // reconnect fall back to their previous simulated/TCP-only behavior.
   isapiUsername: z.string().max(100).optional(),
   isapiPassword: z.string().max(200).optional(),
+  // For setups with a separate entry-only/exit-only terminal instead of one
+  // device at a single door. Defaults to inferring direction automatically.
+  attendanceDirection: z.nativeEnum(DeviceAttendanceDirection).optional(),
 });
 export type CreateDeviceDto = z.infer<typeof createDeviceSchema>;
 
@@ -27,6 +30,7 @@ export const updateDeviceSchema = z.object({
   firmwareVersion: z.string().max(50).optional(),
   isapiUsername: z.string().max(100).optional(),
   isapiPassword: z.string().max(200).optional(),
+  attendanceDirection: z.nativeEnum(DeviceAttendanceDirection).optional(),
 });
 export type UpdateDeviceDto = z.infer<typeof updateDeviceSchema>;
 
