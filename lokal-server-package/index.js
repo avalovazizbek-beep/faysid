@@ -56,6 +56,8 @@ function logLine(message) {
 const config = loadJson(CONFIG_PATH, {});
 const targetUrl = process.env.TARGET_URL || config.targetUrl || "https://tyutorkpi.sies.uz/faysid/api/hikvision/event";
 const listenPort = Number(process.env.LISTEN_PORT || config.listenPort || 5050);
+const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN || config.telegramBotToken || "";
+const telegramChatId = process.env.TELEGRAM_CHAT_ID || config.telegramChatId || "";
 
 async function forwardEvent(body, contentType) {
   const response = await fetch(targetUrl, {
@@ -64,6 +66,29 @@ async function forwardEvent(body, contentType) {
     body,
   });
   return response.status;
+}
+
+// ---------- Lokal serverning o'zidan bevosita Telegram xabari ----------
+//
+// Faqat qurilma kodi va vaqtni biladi (xodimning ismi/rasmi asosiy sayt
+// bazasida saqlanadi, bu yerda yo'q) — shuning uchun xabar quruq bo'ladi.
+// Ixtiyoriy: config.json'da telegramBotToken/telegramChatId bo'sh bo'lsa,
+// hech narsa yubormaydi.
+async function sendTelegramDirect(text) {
+  if (!telegramBotToken || !telegramChatId) return;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: telegramChatId, text }),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      logLine(`Telegram xabar yuborilmadi (${response.status}): ${errText.slice(0, 300)}`);
+    }
+  } catch (error) {
+    logLine(`Telegram xabar yuborishda xato: ${error.message}`);
+  }
 }
 
 // ---------- 1) FAOL: ISAPI polling ----------
@@ -104,6 +129,9 @@ async function pollDevices() {
         } catch (error) {
           logLine(`[${device.name}] XATO: hodisani uzatib bo'lmadi: ${error.message}`);
         }
+
+        const timePart = (event.time.match(/T(\d{2}:\d{2})/) || [])[1] || "";
+        void sendTelegramDirect(`🔔 ${device.name}\nXodim kodi: ${event.employeeNo}\nVaqt: ${timePart}`);
       }
 
       state[device.name] = endTime.toISOString();

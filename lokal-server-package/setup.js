@@ -13,6 +13,7 @@ const { execSync } = require("node:child_process");
 const { testConnection } = require("./isapi-client");
 
 const DEVICES_PATH = path.join(__dirname, "devices.json");
+const CONFIG_PATH = path.join(__dirname, "config.json");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -36,6 +37,18 @@ function loadDevices() {
 
 function saveDevices(devices) {
   fs.writeFileSync(DEVICES_PATH, JSON.stringify(devices, null, 2));
+}
+
+function loadConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveConfig(config) {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
 function commandExists(cmd) {
@@ -90,6 +103,28 @@ async function addDeviceFlow(devices) {
   return next;
 }
 
+async function telegramFlow() {
+  const config = loadConfig();
+  console.log("\n--- Telegram orqali real vaqtli xabar (ixtiyoriy) ---");
+  if (config.telegramBotToken && config.telegramChatId) {
+    console.log("Hozircha sozlangan: bot tokeni va chat ID kiritilgan.");
+    const change = await ask("O'zgartirmoqchimisiz? (ha/yo'q)", "yo'q");
+    if (!change.toLowerCase().startsWith("ha")) return;
+  } else {
+    const want = await ask("Xodim yuz ko'rsatganda shu kompyuterdan Telegramga xabar yuborilsinmi? (ha/yo'q)", "yo'q");
+    if (!want.toLowerCase().startsWith("ha")) return;
+  }
+
+  console.log("Bot tokenini @BotFather orqali olgan bo'lasiz (saytdagi bilan bir xil bo'lishi shart emas).");
+  const botToken = await ask("Bot tokeni", config.telegramBotToken || "");
+  console.log("Chat ID olish: botni guruhga qo'shing, guruhda xabar yozing, so'ng brauzerda");
+  console.log("https://api.telegram.org/bot<TOKEN>/getUpdates ni oching — javobdagi \"chat\":{\"id\":...} qiymati shu.");
+  const chatId = await ask("Chat ID", config.telegramChatId || "");
+
+  saveConfig({ ...config, telegramBotToken: botToken, telegramChatId: chatId });
+  console.log("Telegram sozlamalari saqlandi.");
+}
+
 function startWithPm2() {
   console.log("\n--- Serverni ishga tushirish ---");
   if (!commandExists("pm2")) {
@@ -128,6 +163,8 @@ async function main() {
     devices = await addDeviceFlow(devices);
     addMore = await ask("Yana bitta qurilma qo'shasizmi? (ha/yo'q)", "yo'q");
   }
+
+  await telegramFlow();
 
   startWithPm2();
 

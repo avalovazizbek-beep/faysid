@@ -31,6 +31,23 @@ bu server saytning allaqachon ishlab turgan qabul qilish nuqtasiga ulanadi.
 
 Davomat endi FaceHub saytidagi "Davomat" bo'limida avtomatik ko'rinib turadi.
 
+## Telegram orqali real vaqtli xabar (ixtiyoriy)
+
+`install.bat` (yoki `node setup.js`) ishga tushganda, qurilma(lar)ni qo'shib
+bo'lgach, sizdan Telegram orqali xabar yuborishni xohlaysizmi deb so'raladi.
+Xohlasangiz:
+
+1. Bot tokenini kiriting (@BotFather orqali oldingiz).
+2. Botni Telegram guruhingizga a'zo qiling, guruhda bir xabar yozing, so'ng
+   brauzerda `https://api.telegram.org/bot<TOKEN>/getUpdates` ni oching —
+   javobdagi `"chat":{"id":...}` qiymati sizning Chat ID'ingiz.
+3. Shu Chat ID'ni kiriting.
+
+Shundan keyin, xodim yuz ko'rsatganda, lokal serverning o'zi darhol shu
+guruhga xabar yuboradi (xodim kodi + vaqt — ism/rasm bilmaydi, chunki bu
+ma'lumot faqat asosiy sayt bazasida bor). Buni keyinroq `node setup.js` ni
+qayta ishga tushirib ham sozlash/o'zgartirish mumkin.
+
 ## Yana bitta qurilma qo'shish
 
 `install.bat` faylini xohlagan vaqtingizda qayta ishga tushirsangiz bo'ladi —
