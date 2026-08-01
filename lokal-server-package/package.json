@@ -1,0 +1,13 @@
+{
+  "name": "facehub-lokal-server",
+  "version": "2.0.0",
+  "description": "Hikvision qurilma(lar)dan ISAPI orqali faol davomat olib, Samarqanddagi FaceHub serveriga uzatuvchi lokal server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "start:relay-only": "node relay.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
