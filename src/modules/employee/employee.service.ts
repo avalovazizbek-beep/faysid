@@ -70,7 +70,7 @@ export async function listEmployees(organizationId: string, query: ListEmployees
 
   const where: Prisma.EmployeeWhereInput = {
     organizationId,
-    deletedAt: null,
+    deletedAt: query.deleted === "true" ? { not: null } : null,
     ...(query.departmentId ? { departmentId: query.departmentId } : {}),
     ...(query.status ? { status: query.status } : {}),
     ...(query.search
@@ -134,6 +134,24 @@ export async function updateEmployee(organizationId: string, id: string, dto: Up
 export async function deleteEmployee(organizationId: string, id: string) {
   await getOwnedEmployee(organizationId, id);
   await prisma.employee.update({ where: { id }, data: { deletedAt: new Date() } });
+}
+
+/**
+ * Irreversibly removes an already soft-deleted employee, freeing their
+ * employeeCode for reuse. Cascades (schema-level onDelete: Cascade) to their
+ * attendance/leave/payroll/device-sync history — only callable on a row that
+ * is already soft-deleted, so an accidental click on an active employee can't
+ * destroy their history.
+ */
+export async function purgeEmployee(organizationId: string, id: string) {
+  const employee = await prisma.employee.findFirst({ where: { id, organizationId } });
+  if (!employee) {
+    throw ApiError.notFound("Employee not found");
+  }
+  if (!employee.deletedAt) {
+    throw ApiError.badRequest("Employee must be deleted first before it can be permanently removed");
+  }
+  await prisma.employee.delete({ where: { id } });
 }
 
 const CSV_HEADER = [

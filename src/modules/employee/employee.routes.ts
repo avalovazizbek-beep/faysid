@@ -19,6 +19,7 @@ import {
   getEmployeeHandler,
   importEmployeesHandler,
   listEmployeesHandler,
+  purgeEmployeeHandler,
   pushEmployeeToDeviceHandler,
   updateEmployeeHandler,
 } from "./employee.controller";
@@ -84,6 +85,23 @@ router.patch(
   updateEmployeeHandler,
 );
 router.delete("/:id", validate({ params: employeeIdParamSchema }), deleteEmployeeHandler);
+
+/**
+ * @openapi
+ * /employees/{id}/purge:
+ *   delete:
+ *     summary: Permanently remove an already-deleted employee, freeing their employeeCode for reuse (irreversible, ORG_ADMIN only)
+ *     tags: [Employees]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Employee permanently removed }
+ */
+router.delete(
+  "/:id/purge",
+  authorize(UserRole.ORG_ADMIN),
+  validate({ params: employeeIdParamSchema }),
+  purgeEmployeeHandler,
+);
 
 /**
  * @openapi

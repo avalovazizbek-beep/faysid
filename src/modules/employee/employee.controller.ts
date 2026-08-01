@@ -34,6 +34,11 @@ export const deleteEmployeeHandler = asyncHandler(async (req: Request, res: Resp
   sendSuccess(res, { message: "Employee deleted" });
 });
 
+export const purgeEmployeeHandler = asyncHandler(async (req: Request, res: Response) => {
+  await employeeService.purgeEmployee(req.tenantId!, req.params.id);
+  sendSuccess(res, { message: "Employee permanently removed" });
+});
+
 export const exportEmployeesHandler = asyncHandler(async (req: Request, res: Response) => {
   const csv = await employeeService.exportEmployeesToCsv(req.tenantId!);
   res.setHeader("Content-Type", "text/csv; charset=utf-8");

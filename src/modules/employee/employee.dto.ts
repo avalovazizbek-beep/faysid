@@ -37,6 +37,7 @@ export const listEmployeesQuerySchema = z.object({
   search: z.string().optional(),
   departmentId: z.string().uuid().optional(),
   status: z.nativeEnum(EmployeeStatus).optional(),
+  deleted: z.enum(["true", "false"]).optional(),
 });
 export type ListEmployeesQuery = z.infer<typeof listEmployeesQuerySchema>;
 
