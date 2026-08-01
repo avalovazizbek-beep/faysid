@@ -340,7 +340,7 @@ export async function searchDeviceUsers(device: HikvisionDeviceTarget): Promise<
 export async function fetchDevicePersonPhoto(device: HikvisionDeviceTarget, personId: string): Promise<Buffer | null> {
   try {
     const body = JSON.stringify({
-      FaceInfoSearchCond: { searchID: "1", searchResultPosition: 0, maxResults: 1, faceLibType: "blackFD", FDID: "1", FPID: personId },
+      FaceInfoSearchCond: { searchID: "1", searchResultPosition: 0, maxResults: 1, faceLibType: "staticFD", FDID: "1", FPID: personId },
     });
     const { status, text } = await digestRequest(
       device,
@@ -453,7 +453,7 @@ export async function enrollEmployee(device: HikvisionDeviceTarget, employee: Hi
   if (employee.photoUrl) {
     const photoBuffer = await readPhotoBuffer(employee.photoUrl);
     if (photoBuffer) {
-      const faceMeta = JSON.stringify({ faceLibType: "blackFD", FDID: "1", FPID: employee.employeeCode });
+      const faceMeta = JSON.stringify({ faceLibType: "staticFD", FDID: "1", FPID: employee.employeeCode });
       const boundary = `----FaceHubBoundary${randomBytes(8).toString("hex")}`;
       const multipartBody =
         `--${boundary}\r\n` +
