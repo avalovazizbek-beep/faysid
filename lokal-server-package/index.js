@@ -135,15 +135,16 @@ async function pollDevices() {
     try {
       const events = await searchAcsEvents(device, startTime, endTime);
 
-      // Bitta jismoniy skanerlash bir nechta bir xil vaqtli yozuv qoldirishi
-      // mumkin — takrorlarni saytga yubormasdan oldin ajratib tashlaymiz.
-      const seen = new Set();
-      const deduped = events.filter((e) => {
-        const key = `${e.employeeNo}|${e.time}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      // Bitta jismoniy skanerlash qurilma jurnalida bir nechta (bir-biriga
+      // juda yaqin, lekin har xil sekundli) yozuv qoldirishi mumkin — shuning
+      // uchun har bir xodim uchun shu partiyadagi eng oxirgi hodisanigina
+      // olamiz (soniyagacha aniq bir xilligini talab qilish yetarli emas edi).
+      const latestByEmployee = new Map();
+      for (const e of events) {
+        const existing = latestByEmployee.get(e.employeeNo);
+        if (!existing || e.time > existing.time) latestByEmployee.set(e.employeeNo, e);
+      }
+      const deduped = [...latestByEmployee.values()];
 
       const telegramConfigured = Boolean(telegramBotToken && telegramChatId);
 
