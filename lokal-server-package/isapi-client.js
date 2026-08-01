@@ -73,6 +73,30 @@ async function digestRequest(device, method, uriPath, body, contentType) {
   return { status: secondResponse.status, text: await secondResponse.text() };
 }
 
+/**
+ * Digest-auth so'rovi, lekin binary javob uchun (rasm) — matn emas, Buffer
+ * qaytaradi. `absoluteUrl` berilsa (masalan hodisaning o'z pictureURL'i),
+ * shu manzilga so'rov yuboradi; auth hisoblashda faqat uning path+query
+ * qismi ishlatiladi (RFC 2617 "uri" digest komponenti).
+ */
+async function digestRequestBinary(device, method, uriPath, absoluteUrl) {
+  const url = absoluteUrl || `http://${device.ipAddress}:${device.port}${uriPath}`;
+
+  const firstResponse = await fetch(url, { method });
+  if (firstResponse.status !== 401) {
+    return { status: firstResponse.status, buffer: Buffer.from(await firstResponse.arrayBuffer()) };
+  }
+
+  const challenge = parseWwwAuthenticate(firstResponse.headers.get("www-authenticate"));
+  if (!challenge) {
+    return { status: firstResponse.status, buffer: Buffer.from(await firstResponse.arrayBuffer()) };
+  }
+
+  const authHeader = buildDigestAuthHeader(challenge, method, uriPath, device.isapiUsername, device.isapiPassword);
+  const secondResponse = await fetch(url, { method, headers: { Authorization: authHeader } });
+  return { status: secondResponse.status, buffer: Buffer.from(await secondResponse.arrayBuffer()) };
+}
+
 /** Qurilmaning haqiqiy mahalliy (Asia/Tashkent, +5, DST'siz) vaqtini ISAPI kutgan formatda beradi. */
 function formatIsapiTime(date) {
   const tashkent = new Date(date.getTime() + 5 * 60 * 60_000);
@@ -119,7 +143,12 @@ async function searchAcsEvents(device, startTime, endTime) {
     const page = parsed.AcsEvent?.InfoList ?? [];
     for (const e of page) {
       if (e.employeeNoString && e.time) {
-        events.push({ employeeNo: e.employeeNoString, time: e.time, attendanceStatus: e.attendanceStatus ?? "" });
+        events.push({
+          employeeNo: e.employeeNoString,
+          time: e.time,
+          attendanceStatus: e.attendanceStatus ?? "",
+          pictureURL: e.pictureURL ?? null,
+        });
       }
     }
 
@@ -138,11 +167,29 @@ async function testConnection(device) {
 }
 
 /**
- * Xodimning yuz rasmini bevosita qurilmadan oladi (backendning
+ * Aynan shu hodisada (yuz tekshirilgan payt) qurilma o'zi olgan suratni
+ * yuklab oladi — AcsEvent javobidagi pictureURL orqali (jonli sinovda
+ * tasdiqlangan, real ishlaydi). Bu FDSearch'dagi kutubxona rasmidan farqli
+ * o'laroq, aynan shu daqiqadagi haqiqiy suratni beradi.
+ */
+async function fetchEventPicture(device, pictureURL) {
+  if (!pictureURL) return null;
+  try {
+    const u = new URL(pictureURL);
+    const { status, buffer } = await digestRequestBinary(device, "GET", u.pathname + u.search, pictureURL);
+    if (status !== 200 || buffer.length === 0) return null;
+    return buffer;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Xodimning yuz rasmini kutubxonadan olishga urinadi (backendning
  * fetchDevicePersonPhoto bilan bir xil so'rov). Ba'zi qurilma
  * firmware'larida bu so'rov umuman ishlamaydi (xato qaytaradi qiymatidan
- * qat'i nazar) — bunday holda shunchaki null qaytadi va Telegram xabari
- * rasmsiz, oddiy matn bilan yuboriladi (xatoga sabab bo'lmaydi).
+ * qat'i nazar) — bunday holda shunchaki null qaytadi. Odatda fetchEventPicture
+ * (hodisaning o'z rasmi) ishlatiladi, bu funksiya faqat zaxira sifatida.
  */
 async function fetchPersonPhoto(device, personId) {
   try {
@@ -193,4 +240,4 @@ async function fetchPersonName(device, personId) {
   }
 }
 
-module.exports = { searchAcsEvents, testConnection, fetchPersonPhoto, fetchPersonName };
+module.exports = { searchAcsEvents, testConnection, fetchPersonPhoto, fetchPersonName, fetchEventPicture };
