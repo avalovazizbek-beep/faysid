@@ -124,6 +124,16 @@ model Organization {
   telegramRegistrationCode     String?
   telegramRegistrationCodeDate DateTime? @db.Date
 
+  // Hikvision Open Platform / Hik-Connect cloud credentials — an alternative
+  // to the local ISAPI client (hikvision-isapi.ts) for devices reachable only
+  // via Hikvision's own cloud relay (e.g. behind CGNAT, no port-forward
+  // possible). AppSecret is AES-256-GCM encrypted at rest.
+  hikConnectAppKey       String?
+  hikConnectAppSecretEnc String?
+  // The API gateway address shown on the developer's Open Platform dashboard
+  // — not guessable/hardcodable, varies per account/region.
+  hikConnectApiBaseUrl   String?
+
   settings Json?
 
   createdAt DateTime  @default(now())

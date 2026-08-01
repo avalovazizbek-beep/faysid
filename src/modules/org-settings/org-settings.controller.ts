@@ -12,3 +12,8 @@ export const updateOrgSettingsHandler = asyncHandler(async (req: Request, res: R
   const settings = await orgSettingsService.updateOrgSettings(req.tenantId!, req.body);
   sendSuccess(res, settings);
 });
+
+export const testHikConnectHandler = asyncHandler(async (req: Request, res: Response) => {
+  const result = await orgSettingsService.testHikConnect(req.tenantId!);
+  sendSuccess(res, result);
+});

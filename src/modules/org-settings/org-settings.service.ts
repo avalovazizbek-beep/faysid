@@ -5,6 +5,7 @@ import { env } from "../../config/env";
 import { encryptSecret, decryptSecret } from "../../common/secret-crypto";
 import * as bot from "../telegram-onboarding/telegram-bot-api";
 import { ensureTodaysRegistrationCode } from "../telegram-onboarding/registration-code";
+import * as hikConnect from "../hikconnect/hikconnect-api";
 import { UpdateOrgSettingsDto } from "./org-settings.dto";
 
 function webhookUrl(organizationId: string): string | null {
@@ -15,7 +16,13 @@ function webhookUrl(organizationId: string): string | null {
 export async function getOrgSettings(organizationId: string) {
   const organization = await prisma.organization.findFirst({
     where: { id: organizationId, deletedAt: null },
-    select: { telegramChatId: true, telegramBotTokenEnc: true },
+    select: {
+      telegramChatId: true,
+      telegramBotTokenEnc: true,
+      hikConnectAppKey: true,
+      hikConnectAppSecretEnc: true,
+      hikConnectApiBaseUrl: true,
+    },
   });
   if (!organization) {
     throw ApiError.notFound("Organization not found");
@@ -28,13 +35,31 @@ export async function getOrgSettings(organizationId: string) {
     telegramChatId: organization.telegramChatId,
     hasTelegramBot,
     telegramRegistrationCode,
+    hikConnectAppKey: organization.hikConnectAppKey,
+    hasHikConnectSecret: Boolean(organization.hikConnectAppSecretEnc),
+    hikConnectApiBaseUrl: organization.hikConnectApiBaseUrl,
   };
 }
 
 export async function updateOrgSettings(organizationId: string, dto: UpdateOrgSettingsDto) {
-  const data: { telegramChatId?: string | null } = {};
+  const data: {
+    telegramChatId?: string | null;
+    hikConnectAppKey?: string | null;
+    hikConnectAppSecretEnc?: string | null;
+    hikConnectApiBaseUrl?: string | null;
+  } = {};
+
   if (dto.telegramChatId !== undefined) {
     data.telegramChatId = dto.telegramChatId;
+  }
+  if (dto.hikConnectAppKey !== undefined) {
+    data.hikConnectAppKey = dto.hikConnectAppKey;
+  }
+  if (dto.hikConnectApiBaseUrl !== undefined) {
+    data.hikConnectApiBaseUrl = dto.hikConnectApiBaseUrl;
+  }
+  if (dto.hikConnectAppSecret !== undefined) {
+    data.hikConnectAppSecretEnc = dto.hikConnectAppSecret ? encryptSecret(dto.hikConnectAppSecret) : null;
   }
 
   if (dto.telegramBotToken !== undefined) {
@@ -83,4 +108,20 @@ export async function updateOrgSettings(organizationId: string, dto: UpdateOrgSe
   }
 
   return getOrgSettings(organizationId);
+}
+
+export async function testHikConnect(organizationId: string) {
+  const organization = await prisma.organization.findFirst({
+    where: { id: organizationId, deletedAt: null },
+    select: { hikConnectAppKey: true, hikConnectAppSecretEnc: true, hikConnectApiBaseUrl: true },
+  });
+  if (!organization?.hikConnectAppKey || !organization.hikConnectAppSecretEnc || !organization.hikConnectApiBaseUrl) {
+    throw ApiError.badRequest("Hik-Connect AppKey, AppSecret va API manzili to'liq kiritilmagan");
+  }
+
+  return hikConnect.testConnection({
+    appKey: organization.hikConnectAppKey,
+    appSecret: decryptSecret(organization.hikConnectAppSecretEnc),
+    apiBaseUrl: organization.hikConnectApiBaseUrl,
+  });
 }
