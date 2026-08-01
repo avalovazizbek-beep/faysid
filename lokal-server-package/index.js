@@ -21,7 +21,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const { searchAcsEvents } = require("./isapi-client");
+const { searchAcsEvents, fetchPersonPhoto } = require("./isapi-client");
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
 const DEVICES_PATH = path.join(__dirname, "devices.json");
@@ -70,18 +70,31 @@ async function forwardEvent(body, contentType) {
 
 // ---------- Lokal serverning o'zidan bevosita Telegram xabari ----------
 //
-// Faqat qurilma kodi va vaqtni biladi (xodimning ismi/rasmi asosiy sayt
-// bazasida saqlanadi, bu yerda yo'q) — shuning uchun xabar quruq bo'ladi.
-// Ixtiyoriy: config.json'da telegramBotToken/telegramChatId bo'sh bo'lsa,
-// hech narsa yubormaydi.
-async function sendTelegramDirect(text) {
+// Qurilmadan (ISAPI FDSearch orqali) xodimning rasmini olib, shu rasm bilan
+// birga yuboradi — ismni bilmaydi (bu faqat asosiy sayt bazasida bor), shuning
+// uchun sarlavha faqat xodim kodi bilan. Rasm topilmasa, oddiy matn xabar
+// yuboriladi. Ixtiyoriy: config.json'da telegramBotToken/telegramChatId bo'sh
+// bo'lsa, hech narsa yubormaydi.
+async function sendTelegramDirect(caption, photoBuffer) {
   if (!telegramBotToken || !telegramChatId) return;
   try {
-    const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: telegramChatId, text }),
-    });
+    let response;
+    if (photoBuffer) {
+      const form = new FormData();
+      form.append("chat_id", telegramChatId);
+      form.append("caption", caption);
+      form.append("photo", new Blob([photoBuffer]), "face.jpg");
+      response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendPhoto`, {
+        method: "POST",
+        body: form,
+      });
+    } else {
+      response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: telegramChatId, text: caption }),
+      });
+    }
     if (!response.ok) {
       const errText = await response.text();
       logLine(`Telegram xabar yuborilmadi (${response.status}): ${errText.slice(0, 300)}`);
@@ -116,12 +129,17 @@ async function pollDevices() {
         return true;
       });
 
+      const telegramConfigured = Boolean(telegramBotToken && telegramChatId);
+
       for (const event of deduped) {
         const body = JSON.stringify({
           employeeNoString: event.employeeNo,
           attendanceStatus: event.attendanceStatus,
           dateTime: event.time,
           ipAddress: device.ipAddress,
+          // Platforma shu belgi bo'lsa o'zining real-vaqtli Telegram xabarini
+          // yubormaydi — takrorlanmasin uchun (lokal server allaqachon yuboradi).
+          telegramHandledExternally: telegramConfigured,
         });
         try {
           const status = await forwardEvent(body, "application/json");
@@ -130,8 +148,12 @@ async function pollDevices() {
           logLine(`[${device.name}] XATO: hodisani uzatib bo'lmadi: ${error.message}`);
         }
 
-        const timePart = (event.time.match(/T(\d{2}:\d{2})/) || [])[1] || "";
-        void sendTelegramDirect(`🔔 ${device.name}\nXodim kodi: ${event.employeeNo}\nVaqt: ${timePart}`);
+        if (telegramConfigured) {
+          const timePart = (event.time.match(/T(\d{2}:\d{2})/) || [])[1] || "";
+          const caption = `🔔 ${device.name}\nXodim kodi: ${event.employeeNo}\nVaqt: ${timePart}`;
+          const photoBuffer = await fetchPersonPhoto(device, event.employeeNo);
+          void sendTelegramDirect(caption, photoBuffer);
+        }
       }
 
       state[device.name] = endTime.toISOString();

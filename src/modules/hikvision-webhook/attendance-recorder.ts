@@ -71,6 +71,7 @@ export async function recordDeviceAttendanceEvent(
   employeeNo: string,
   attendanceStatus: string,
   source: "webhook" | "poll",
+  options?: { skipTelegram?: boolean },
 ): Promise<void> {
   const employee = await prisma.employee.findFirst({
     where: {
@@ -141,7 +142,7 @@ export async function recordDeviceAttendanceEvent(
         entityId: employee.id,
         metadata: { source },
       });
-      await notifyTelegramAttendance(device.organizationId, employee, true);
+      if (!options?.skipTelegram) await notifyTelegramAttendance(device.organizationId, employee, true);
     } else if (isCheckIn) {
       await checkIn(device.organizationId, { employeeId: employee.id, type: "FACE" });
       logger.info(`Hikvision ${source}: recorded check-in for employee ${employee.id} via device ${device.id}`);
@@ -152,7 +153,7 @@ export async function recordDeviceAttendanceEvent(
         entityId: employee.id,
         metadata: { source },
       });
-      await notifyTelegramAttendance(device.organizationId, employee, false);
+      if (!options?.skipTelegram) await notifyTelegramAttendance(device.organizationId, employee, false);
     } else {
       logger.warn(`Hikvision ${source}: unrecognized attendanceStatus "${attendanceStatus}" for employee ${employee.id}`);
     }

@@ -15,6 +15,7 @@ interface ParsedHikvisionEvent {
   attendanceStatus: string;
   dateTime: Date;
   deviceIdentifiers: string[];
+  telegramHandledExternally: boolean;
 }
 
 function parseEventObject(raw: unknown): ParsedHikvisionEvent {
@@ -38,7 +39,13 @@ function parseEventObject(raw: unknown): ParsedHikvisionEvent {
   const deviceIdentifiers = [eventObj.macAddress, eventObj.deviceID, eventObj.serialNumber, eventObj.ipAddress]
     .filter((v): v is string => typeof v === "string" && v.length > 0);
 
-  return { employeeNo, attendanceStatus, dateTime, deviceIdentifiers };
+  // Set by lokal-server (index.js) when it has its own Telegram bot token/chat
+  // ID configured and already sent a real-time notification itself (with a
+  // photo fetched directly from the device) — the platform must not send a
+  // second, duplicate notification for the same event in that case.
+  const telegramHandledExternally = eventObj.telegramHandledExternally === true;
+
+  return { employeeNo, attendanceStatus, dateTime, deviceIdentifiers, telegramHandledExternally };
 }
 
 function extractRawEvent(body: Record<string, unknown>, files: Express.Multer.File[]): unknown {
@@ -113,5 +120,7 @@ export async function processHikvisionEvent(body: Record<string, unknown>, files
     return;
   }
 
-  await recordDeviceAttendanceEvent(device, parsed.employeeNo, parsed.attendanceStatus, "webhook");
+  await recordDeviceAttendanceEvent(device, parsed.employeeNo, parsed.attendanceStatus, "webhook", {
+    skipTelegram: parsed.telegramHandledExternally,
+  });
 }

@@ -330,17 +330,20 @@ export async function searchDeviceUsers(device: HikvisionDeviceTarget): Promise<
 
 /**
  * Pulls a person's enrolled face photo back off the device — the read-side
- * counterpart of the FaceDataRecord upload in enrollEmployee(). Hikvision's
- * face-library search response shape (a "picUri" to fetch separately vs. an
- * inline base64 blob) varies by firmware and isn't confirmed against this
- * specific device yet; this handles both known shapes and returns null
- * (rather than throwing) on anything unexpected, since a missing photo
- * should never block importing the person themselves.
+ * counterpart of the FaceDataRecord upload in enrollEmployee(). Confirmed
+ * live against a real DS-K1T331W: GET /ISAPI/Intelligent/FDLib lists this
+ * device's only real library as FDID "1" / faceLibType "blackFD" (matching
+ * the value used below), yet FDSearch itself still rejects every request
+ * with "MessageParametersLack: faceLibType" regardless of the value sent —
+ * a firmware-level limitation on this model/version, not a wrong guess here.
+ * Returns null (rather than throwing) so a missing photo never blocks
+ * importing the person themselves; the practical workaround is uploading
+ * the employee's photo manually via the Employees page.
  */
 export async function fetchDevicePersonPhoto(device: HikvisionDeviceTarget, personId: string): Promise<Buffer | null> {
   try {
     const body = JSON.stringify({
-      FaceInfoSearchCond: { searchID: "1", searchResultPosition: 0, maxResults: 1, faceLibType: "staticFD", FDID: "1", FPID: personId },
+      FaceInfoSearchCond: { searchID: "1", searchResultPosition: 0, maxResults: 1, faceLibType: "blackFD", FDID: "1", FPID: personId },
     });
     const { status, text } = await digestRequest(
       device,
@@ -453,7 +456,7 @@ export async function enrollEmployee(device: HikvisionDeviceTarget, employee: Hi
   if (employee.photoUrl) {
     const photoBuffer = await readPhotoBuffer(employee.photoUrl);
     if (photoBuffer) {
-      const faceMeta = JSON.stringify({ faceLibType: "staticFD", FDID: "1", FPID: employee.employeeCode });
+      const faceMeta = JSON.stringify({ faceLibType: "blackFD", FDID: "1", FPID: employee.employeeCode });
       const boundary = `----FaceHubBoundary${randomBytes(8).toString("hex")}`;
       const multipartBody =
         `--${boundary}\r\n` +

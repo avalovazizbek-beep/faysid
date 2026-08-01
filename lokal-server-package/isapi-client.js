@@ -137,4 +137,34 @@ async function testConnection(device) {
   return status === 200;
 }
 
-module.exports = { searchAcsEvents, testConnection };
+/**
+ * Xodimning yuz rasmini bevosita qurilmadan oladi (backendning
+ * fetchDevicePersonPhoto bilan bir xil so'rov). Ba'zi qurilma
+ * firmware'larida bu so'rov umuman ishlamaydi (xato qaytaradi qiymatidan
+ * qat'i nazar) — bunday holda shunchaki null qaytadi va Telegram xabari
+ * rasmsiz, oddiy matn bilan yuboriladi (xatoga sabab bo'lmaydi).
+ */
+async function fetchPersonPhoto(device, personId) {
+  try {
+    const body = JSON.stringify({
+      FaceInfoSearchCond: { searchID: "1", searchResultPosition: 0, maxResults: 1, faceLibType: "blackFD", FDID: "1", FPID: personId },
+    });
+    const { status, text } = await digestRequest(
+      device,
+      "POST",
+      "/ISAPI/Intelligent/FDLib/FDSearch?format=json",
+      body,
+      "application/json",
+    );
+    if (status !== 200) return null;
+
+    const parsed = JSON.parse(text);
+    const match = parsed.FaceInfoSearch?.MatchList?.[0];
+    if (!match?.data) return null;
+    return Buffer.from(match.data, "base64");
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { searchAcsEvents, testConnection, fetchPersonPhoto };
