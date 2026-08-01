@@ -26,6 +26,7 @@ const { searchAcsEvents, fetchPersonPhoto } = require("./isapi-client");
 const CONFIG_PATH = path.join(__dirname, "config.json");
 const DEVICES_PATH = path.join(__dirname, "devices.json");
 const STATE_PATH = path.join(__dirname, "state.json");
+const ATTENDANCE_STATE_PATH = path.join(__dirname, "attendance-state.json");
 const LOG_PATH = path.join(__dirname, "relay.log");
 
 const POLL_INTERVAL_MS = 20_000;
@@ -58,6 +59,21 @@ const targetUrl = process.env.TARGET_URL || config.targetUrl || "https://tyutork
 const listenPort = Number(process.env.LISTEN_PORT || config.listenPort || 5050);
 const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN || config.telegramBotToken || "";
 const telegramChatId = process.env.TELEGRAM_CHAT_ID || config.telegramChatId || "";
+
+// Backend darhol javob qaytarishi kerak (real qurilma tez javob kutadi),
+// shuning uchun u kirish/chiqishni aniqlab bo'lgach bizga qaytarib bera
+// olmaydi — lokal serverning o'zi xuddi shu (birinchi hodisa = kirish,
+// keyingisi = chiqish) mantiqni mahalliy saqlab, Telegram xabarida
+// ko'rsatadi.
+function inferDirection(employeeNo, eventTimeIso) {
+  const dateStr = eventTimeIso.slice(0, 10);
+  const key = `${employeeNo}|${dateStr}`;
+  const state = loadJson(ATTENDANCE_STATE_PATH, {});
+  const isCheckIn = !state[key];
+  state[key] = isCheckIn;
+  saveJson(ATTENDANCE_STATE_PATH, state);
+  return isCheckIn ? "in" : "out";
+}
 
 async function forwardEvent(body, contentType) {
   const response = await fetch(targetUrl, {
@@ -150,7 +166,10 @@ async function pollDevices() {
 
         if (telegramConfigured) {
           const timePart = (event.time.match(/T(\d{2}:\d{2})/) || [])[1] || "";
-          const caption = `🔔 ${device.name}\nXodim kodi: ${event.employeeNo}\nVaqt: ${timePart}`;
+          const direction = inferDirection(event.employeeNo, event.time);
+          const emoji = direction === "out" ? "🔴" : "🟢";
+          const label = direction === "out" ? "Chiqdi" : "Keldi";
+          const caption = `${emoji} ${device.name}\nXodim kodi: ${event.employeeNo}\n${label}: ${timePart}`;
           const photoBuffer = await fetchPersonPhoto(device, event.employeeNo);
           void sendTelegramDirect(caption, photoBuffer);
         }
