@@ -124,16 +124,6 @@ model Organization {
   telegramRegistrationCode     String?
   telegramRegistrationCodeDate DateTime? @db.Date
 
-  // Hikvision Open Platform / Hik-Connect cloud credentials — an alternative
-  // to the local ISAPI client (hikvision-isapi.ts) for devices reachable only
-  // via Hikvision's own cloud relay (e.g. behind CGNAT, no port-forward
-  // possible). AppSecret is AES-256-GCM encrypted at rest.
-  hikConnectAppKey       String?
-  hikConnectAppSecretEnc String?
-  // The API gateway address shown on the developer's Open Platform dashboard
-  // — not guessable/hardcodable, varies per account/region.
-  hikConnectApiBaseUrl   String?
-
   settings Json?
 
   createdAt DateTime  @default(now())
@@ -317,6 +307,28 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+/// Single-row platform-wide settings, managed only by SUPER_ADMIN — for
+/// credentials that belong to the platform operator's own account rather
+/// than to any one tenant organization (e.g. a single Hikvision Open
+/// Platform developer account used to reach devices across organizations).
+model PlatformSettings {
+  id Int @id @default(1)
+
+  // Hik-Connect / Hikvision Open Platform cloud credentials — an alternative
+  // to the local ISAPI client (hikvision-isapi.ts) for devices reachable only
+  // via Hikvision's own cloud relay (e.g. behind CGNAT, no port-forward
+  // possible). AppSecret is AES-256-GCM encrypted at rest.
+  hikConnectAppKey       String?
+  hikConnectAppSecretEnc String?
+  // The API gateway address shown on the developer's Open Platform dashboard
+  // — not guessable/hardcodable, varies per account/region.
+  hikConnectApiBaseUrl   String?
+
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_settings")
 }
 
 model AuditLog {

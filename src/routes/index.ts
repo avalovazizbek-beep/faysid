@@ -18,6 +18,7 @@ import holidayRoutes from "../modules/holiday/holiday.routes";
 import calendarRoutes from "../modules/calendar/calendar.routes";
 import orgSettingsRoutes from "../modules/org-settings/org-settings.routes";
 import employeeApplicationRoutes from "../modules/employee-applications/employee-application.routes";
+import platformSettingsRoutes from "../modules/platform-settings/platform-settings.routes";
 
 const router = Router();
 
@@ -44,5 +45,6 @@ router.use("/holidays", holidayRoutes);
 router.use("/calendar", calendarRoutes);
 router.use("/org/settings", orgSettingsRoutes);
 router.use("/employee-applications", employeeApplicationRoutes);
+router.use("/admin/settings", platformSettingsRoutes);
 
 export default router;
