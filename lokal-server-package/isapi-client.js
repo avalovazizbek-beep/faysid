@@ -167,4 +167,30 @@ async function fetchPersonPhoto(device, personId) {
   }
 }
 
-module.exports = { searchAcsEvents, testConnection, fetchPersonPhoto };
+/**
+ * Xodimning ismini qurilmadan oladi (UserInfo/Search — bu so'rov, FDSearch'dan
+ * farqli o'laroq, bu qurilmada real ishlashi tasdiqlangan). Topilmasa null.
+ */
+async function fetchPersonName(device, personId) {
+  try {
+    const body = JSON.stringify({
+      UserInfoSearchCond: { searchID: "1", searchResultPosition: 0, maxResults: 1, EmployeeNoList: [{ employeeNo: personId }] },
+    });
+    const { status, text } = await digestRequest(
+      device,
+      "POST",
+      "/ISAPI/AccessControl/UserInfo/Search?format=json",
+      body,
+      "application/json",
+    );
+    if (status !== 200) return null;
+
+    const parsed = JSON.parse(text);
+    const user = parsed.UserInfoSearch?.UserInfo?.[0];
+    return user?.name || null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { searchAcsEvents, testConnection, fetchPersonPhoto, fetchPersonName };

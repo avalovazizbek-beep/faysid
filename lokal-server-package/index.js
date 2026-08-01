@@ -21,7 +21,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const { searchAcsEvents, fetchPersonPhoto } = require("./isapi-client");
+const { searchAcsEvents, fetchPersonPhoto, fetchPersonName } = require("./isapi-client");
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
 const DEVICES_PATH = path.join(__dirname, "devices.json");
@@ -169,7 +169,9 @@ async function pollDevices() {
           const direction = inferDirection(event.employeeNo, event.time);
           const emoji = direction === "out" ? "🔴" : "🟢";
           const label = direction === "out" ? "Chiqdi" : "Keldi";
-          const caption = `${emoji} ${device.name}\nXodim kodi: ${event.employeeNo}\n${label}: ${timePart}`;
+          const personName = await fetchPersonName(device, event.employeeNo);
+          const who = personName || `Xodim kodi: ${event.employeeNo}`;
+          const caption = `${emoji} ${who}\n${label}: ${timePart}`;
           const photoBuffer = await fetchPersonPhoto(device, event.employeeNo);
           void sendTelegramDirect(caption, photoBuffer);
         }
