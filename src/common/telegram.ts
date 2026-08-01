@@ -32,3 +32,48 @@ export async function sendTelegramDocument(
     throw new Error(`Telegram sendDocument failed (${response.status}): ${body}`);
   }
 }
+
+/**
+ * Sends a photo (with an inline preview, unlike sendDocument) — used for the
+ * real-time check-in/check-out notification showing the employee's photo.
+ */
+export async function sendTelegramPhoto(chatId: string, buffer: Buffer, caption?: string): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN) {
+    logger.warn(`Telegram: TELEGRAM_BOT_TOKEN not set — skipping photo send to chat ${chatId}`);
+    return;
+  }
+
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  if (caption) form.append("caption", caption);
+  form.append("photo", new Blob([buffer]), "photo.jpg");
+
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Telegram sendPhoto failed (${response.status}): ${body}`);
+  }
+}
+
+/** Text-only notification — used when the employee has no stored photo. */
+export async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN) {
+    logger.warn(`Telegram: TELEGRAM_BOT_TOKEN not set — skipping message send to chat ${chatId}`);
+    return;
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Telegram sendMessage failed (${response.status}): ${body}`);
+  }
+}

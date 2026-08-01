@@ -44,11 +44,11 @@ export async function runDailyReportJob(): Promise<void> {
 
 export function startDailyReportCron(): void {
   cron.schedule(
-    "0 21 * * *",
+    "0 18 * * *",
     () => {
       runDailyReportJob().catch((error) => logger.error(`Daily report job failed: ${error}`));
     },
     { timezone: "Asia/Tashkent" },
   );
-  logger.info("Daily report cron scheduled (21:00 Asia/Tashkent)");
+  logger.info("Daily report cron scheduled (18:00 Asia/Tashkent)");
 }

@@ -1,11 +1,62 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "../../config/prisma";
 import { logger } from "../../config/logger";
 import { recordAuditLog } from "../../common/audit-log";
+import { sendTelegramMessage, sendTelegramPhoto } from "../../common/telegram";
 import { checkIn, checkOut } from "../attendance/attendance.service";
 
 function startOfToday(): Date {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/** Renders a Date as Asia/Tashkent (UTC+5, no DST) wall-clock "HH:mm". */
+function formatTashkentTime(date: Date): string {
+  const tashkent = new Date(date.getTime() + 5 * 60 * 60_000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(tashkent.getUTCHours())}:${pad(tashkent.getUTCMinutes())}`;
+}
+
+async function readEmployeePhoto(photoUrl: string): Promise<Buffer | null> {
+  try {
+    const relative = photoUrl.replace(/^\/uploads\//, "");
+    const absolute = path.join(__dirname, "..", "..", "..", "uploads", relative);
+    return await readFile(absolute);
+  } catch (error) {
+    logger.warn(`Telegram notification: could not read employee photo ${photoUrl}: ${error}`);
+    return null;
+  }
+}
+
+/**
+ * Real-time "xodim keldi/ketdi" notification to the org's Telegram chat
+ * (org.telegramChatId — the same destination as the 18:00 daily report).
+ * Best-effort: a failure here must never undo the attendance record that was
+ * already successfully saved.
+ */
+async function notifyTelegramAttendance(
+  organizationId: string,
+  employee: { fullName: string; photoUrl: string | null },
+  isCheckOut: boolean,
+): Promise<void> {
+  try {
+    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { telegramChatId: true } });
+    if (!org?.telegramChatId) return;
+
+    const emoji = isCheckOut ? "🔴" : "🟢";
+    const label = isCheckOut ? "Chiqdi" : "Keldi";
+    const caption = `${emoji} ${employee.fullName}\n${label}: ${formatTashkentTime(new Date())}`;
+
+    const photoBuffer = employee.photoUrl ? await readEmployeePhoto(employee.photoUrl) : null;
+    if (photoBuffer) {
+      await sendTelegramPhoto(org.telegramChatId, photoBuffer, caption);
+    } else {
+      await sendTelegramMessage(org.telegramChatId, caption);
+    }
+  } catch (error) {
+    logger.warn(`Telegram attendance notification failed for organization ${organizationId}: ${error}`);
+  }
 }
 
 /**
@@ -90,6 +141,7 @@ export async function recordDeviceAttendanceEvent(
         entityId: employee.id,
         metadata: { source },
       });
+      await notifyTelegramAttendance(device.organizationId, employee, true);
     } else if (isCheckIn) {
       await checkIn(device.organizationId, { employeeId: employee.id, type: "FACE" });
       logger.info(`Hikvision ${source}: recorded check-in for employee ${employee.id} via device ${device.id}`);
@@ -100,6 +152,7 @@ export async function recordDeviceAttendanceEvent(
         entityId: employee.id,
         metadata: { source },
       });
+      await notifyTelegramAttendance(device.organizationId, employee, false);
     } else {
       logger.warn(`Hikvision ${source}: unrecognized attendanceStatus "${attendanceStatus}" for employee ${employee.id}`);
     }
