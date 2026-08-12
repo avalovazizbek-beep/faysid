@@ -75,8 +75,24 @@ export async function runHikvisionAttendancePoll(): Promise<void> {
       }
 
       const deduped = dedupe(events);
+
+      // Live verification snapshots (the exact camera capture for each event)
+      // are only available via Hik-Connect's cloud certificaterecords API,
+      // correlated by AcsEvent's own serialNo — matches the confirmed-live
+      // standalone bot's approach. Direct-ISAPI devices fall back to the
+      // employee's stored profile photo inside notifyTelegramAttendance().
+      let snapshots: Map<string, string> | null = null;
+      if (device.hikConnectDeviceId && hikConnectCredentials && deduped.length > 0) {
+        try {
+          snapshots = await hikConnect.searchCertificateSnapshots(hikConnectCredentials, device.hikConnectDeviceId, startTime, endTime);
+        } catch (error) {
+          logger.warn(`${device.name}: could not fetch verification snapshots: ${error}`);
+        }
+      }
+
       for (const event of deduped) {
-        await recordDeviceAttendanceEvent(device, event.employeeNo, event.attendanceStatus, "poll");
+        const snapshotUrl = event.serialNo ? snapshots?.get(event.serialNo) : undefined;
+        await recordDeviceAttendanceEvent(device, event.employeeNo, event.attendanceStatus, "poll", { snapshotUrl });
       }
 
       if (deduped.length > 0) {

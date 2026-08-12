@@ -3,7 +3,7 @@ import path from "node:path";
 import { prisma } from "../../config/prisma";
 import { logger } from "../../config/logger";
 import { recordAuditLog } from "../../common/audit-log";
-import { sendTelegramMessage, sendTelegramPhoto } from "../../common/telegram";
+import { sendTelegramMessage, sendTelegramPhoto, sendTelegramPhotoByUrl } from "../../common/telegram";
 import { checkIn, checkOut } from "../attendance/attendance.service";
 
 function startOfToday(): Date {
@@ -35,11 +35,17 @@ async function readEmployeePhoto(photoUrl: string): Promise<Buffer | null> {
  * back to the organization's default chat (org.telegramChatId — the same
  * destination as the 18:00 daily report). Best-effort: a failure here must
  * never undo the attendance record that was already successfully saved.
+ *
+ * Photo priority: the event's own live verification snapshot (snapshotUrl —
+ * the exact camera capture from that scan, matching the old standalone bot's
+ * behavior) when available, else the employee's stored FaceHub profile
+ * photo, else text-only.
  */
 async function notifyTelegramAttendance(
-  device: { organizationId: string; telegramChatId?: string | null },
+  device: { name?: string; organizationId: string; telegramChatId?: string | null },
   employee: { fullName: string; photoUrl: string | null },
   isCheckOut: boolean,
+  snapshotUrl?: string,
 ): Promise<void> {
   try {
     let chatId = device.telegramChatId ?? null;
@@ -51,7 +57,19 @@ async function notifyTelegramAttendance(
 
     const emoji = isCheckOut ? "🔴" : "🟢";
     const label = isCheckOut ? "Chiqdi" : "Keldi";
-    const caption = `${emoji} ${employee.fullName}\n${label}: ${formatTashkentTime(new Date())}`;
+    const captionLines = [`${emoji} ${label}`, `👤 ${employee.fullName}`];
+    if (device.name) captionLines.push(`📍 ${device.name}`);
+    captionLines.push(`🕐 ${formatTashkentTime(new Date())}`);
+    const caption = captionLines.join("\n");
+
+    if (snapshotUrl) {
+      try {
+        await sendTelegramPhotoByUrl(chatId, snapshotUrl, caption);
+        return;
+      } catch (error) {
+        logger.warn(`Telegram attendance notification: snapshot send failed, falling back: ${error}`);
+      }
+    }
 
     const photoBuffer = employee.photoUrl ? await readEmployeePhoto(employee.photoUrl) : null;
     if (photoBuffer) {
@@ -74,6 +92,7 @@ async function notifyTelegramAttendance(
 export async function recordDeviceAttendanceEvent(
   device: {
     id: string;
+    name?: string;
     organizationId: string;
     attendanceDirection?: "AUTO" | "CHECK_IN_ONLY" | "CHECK_OUT_ONLY";
     telegramChatId?: string | null;
@@ -81,7 +100,7 @@ export async function recordDeviceAttendanceEvent(
   employeeNo: string,
   attendanceStatus: string,
   source: "webhook" | "poll",
-  options?: { skipTelegram?: boolean },
+  options?: { skipTelegram?: boolean; snapshotUrl?: string },
 ): Promise<void> {
   const employee = await prisma.employee.findFirst({
     where: {
@@ -152,7 +171,7 @@ export async function recordDeviceAttendanceEvent(
         entityId: employee.id,
         metadata: { source },
       });
-      if (!options?.skipTelegram) await notifyTelegramAttendance(device, employee, true);
+      if (!options?.skipTelegram) await notifyTelegramAttendance(device, employee, true, options?.snapshotUrl);
     } else if (isCheckIn) {
       await checkIn(device.organizationId, { employeeId: employee.id, type: "FACE" });
       logger.info(`Hikvision ${source}: recorded check-in for employee ${employee.id} via device ${device.id}`);
@@ -163,7 +182,7 @@ export async function recordDeviceAttendanceEvent(
         entityId: employee.id,
         metadata: { source },
       });
-      if (!options?.skipTelegram) await notifyTelegramAttendance(device, employee, false);
+      if (!options?.skipTelegram) await notifyTelegramAttendance(device, employee, false, options?.snapshotUrl);
     } else {
       logger.warn(`Hikvision ${source}: unrecognized attendanceStatus "${attendanceStatus}" for employee ${employee.id}`);
     }

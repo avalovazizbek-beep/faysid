@@ -491,7 +491,19 @@ export async function importDeviceUser(organizationId: string, deviceId: string,
   // ones used by a previously soft-deleted employee, which still block reuse
   // at the DB level) and throws a friendly ApiError — no need to duplicate
   // that check here.
-  return createEmployee(organizationId, { employeeCode: personId, fullName: name?.trim() || personId }, photoUrl);
+  const employee = await createEmployee(organizationId, { employeeCode: personId, fullName: name?.trim() || personId }, photoUrl);
+
+  // They're already enrolled on this device (that's the whole premise of
+  // "import from device") — record that link now so device-scoped views
+  // (Employees/Attendance's device filter) pick them up immediately instead
+  // of only after an explicit sync/push round-trip.
+  await prisma.deviceEmployeeSync.upsert({
+    where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
+    create: { deviceId: device.id, employeeId: employee.id, status: "SYNCED", syncedAt: new Date() },
+    update: { status: "SYNCED", syncedAt: new Date(), errorMessage: null },
+  });
+
+  return employee;
 }
 
 export async function listDeviceSyncs(organizationId: string, deviceId: string) {

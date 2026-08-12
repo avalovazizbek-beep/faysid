@@ -11,6 +11,7 @@ import { startDailyReportCron } from "./jobs/daily-report.job";
 import { startHikvisionPollCron } from "./jobs/hikvision-poll.job";
 import { startHikvisionAttendancePollCron } from "./jobs/hikvision-attendance-poll.job";
 import { startTelegramRegistrationCodeCron } from "./jobs/telegram-registration-code.job";
+import { registerTelegramBotWebhook } from "./modules/telegram-bot/telegram-bot.service";
 
 async function bootstrap(): Promise<void> {
   await prisma.$connect();
@@ -29,6 +30,7 @@ async function bootstrap(): Promise<void> {
   startHikvisionPollCron();
   startHikvisionAttendancePollCron();
   startTelegramRegistrationCodeCron();
+  await registerTelegramBotWebhook();
 
   const app = createApp();
   const httpServer = createServer(app);

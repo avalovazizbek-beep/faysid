@@ -92,6 +92,19 @@ export async function deleteWebhook(token: string): Promise<void> {
   await fetch(apiUrl(token, "deleteWebhook"), { method: "POST" });
 }
 
+/** Populates Telegram's own "/" command-suggestion menu inside a chat. */
+export async function setMyCommands(token: string, commands: { command: string; description: string }[]): Promise<void> {
+  const response = await fetch(apiUrl(token, "setMyCommands"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ commands }),
+  });
+  const data = (await response.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+  if (!response.ok || !data.ok) {
+    throw new Error(`Telegram setMyCommands failed: ${data.description ?? response.status}`);
+  }
+}
+
 export async function getBotUsername(token: string): Promise<string | undefined> {
   const response = await fetch(apiUrl(token, "getMe"));
   if (!response.ok) return undefined;

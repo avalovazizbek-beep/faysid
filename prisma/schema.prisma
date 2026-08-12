@@ -334,6 +334,13 @@ model PlatformSettings {
   // south_america/north_america), or null to try every region at login.
   hikConnectRegion       String?
 
+  // Secret compared against Telegram's X-Telegram-Bot-Api-Secret-Token header
+  // on the main notification bot's webhook (env.TELEGRAM_BOT_TOKEN) — that
+  // bot is global (one token for the whole platform, unlike each
+  // organization's own onboarding bot), so its webhook secret lives here
+  // rather than per-organization. Generated once on first server boot.
+  telegramBotWebhookSecret String?
+
   updatedAt DateTime @updatedAt
 
   @@map("platform_settings")

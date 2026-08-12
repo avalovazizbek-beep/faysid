@@ -297,7 +297,12 @@ export async function searchDeviceEvents(
       const time = e.time as string | undefined;
       const isIdentification = e.major === 5 && e.minor === 75;
       if (name && employeeNoString && time && isIdentification) {
-        events.push({ employeeNo: employeeNoString, time, attendanceStatus: (e.attendanceStatus as string) ?? "" });
+        events.push({
+          employeeNo: employeeNoString,
+          time,
+          attendanceStatus: (e.attendanceStatus as string) ?? "",
+          serialNo: e.serialNo !== undefined ? String(e.serialNo) : undefined,
+        });
       }
     }
     if (acsEvent.responseStatusStrg !== "MORE" || page.length === 0) break;

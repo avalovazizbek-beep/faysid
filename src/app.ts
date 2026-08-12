@@ -14,6 +14,7 @@ import { swaggerSpec } from "./docs/swagger";
 import routes from "./routes";
 import hikvisionWebhookRoutes from "./modules/hikvision-webhook/hikvision-webhook.routes";
 import telegramOnboardingRoutes from "./modules/telegram-onboarding/telegram-onboarding.routes";
+import telegramBotRoutes from "./modules/telegram-bot/telegram-bot.routes";
 
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
 
@@ -35,6 +36,7 @@ const RESERVED_PREFIXES = [
   `${BASE_PATH}/uploads`,
   `${BASE_PATH}/api/hikvision/event`,
   `${BASE_PATH}/api/telegram-webhook`,
+  `${BASE_PATH}/api/telegram-bot-webhook`,
   "/api/docs",
 ];
 
@@ -85,6 +87,7 @@ export function createApp(): Application {
   // fire in bursts) rather than through our normal API surface.
   app.use(`${BASE_PATH}/api/hikvision/event`, hikvisionWebhookRoutes);
   app.use(`${BASE_PATH}/api/telegram-webhook`, telegramOnboardingRoutes);
+  app.use(`${BASE_PATH}/api/telegram-bot-webhook`, telegramBotRoutes);
 
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));

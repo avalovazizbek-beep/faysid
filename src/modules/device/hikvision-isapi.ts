@@ -172,6 +172,10 @@ export interface HikvisionAttendanceEvent {
   employeeNo: string;
   time: string;
   attendanceStatus: string;
+  /** ISAPI AcsEvent's own event serial number — correlates this event with its
+   * cloud-side verification snapshot (Hik-Connect certificaterecords'
+   * devSerialNo). Only populated on the Hik-Connect proxypass path. */
+  serialNo?: string;
 }
 
 /**

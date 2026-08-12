@@ -59,6 +59,30 @@ export async function sendTelegramPhoto(chatId: string, buffer: Buffer, caption?
   }
 }
 
+/**
+ * Sends a photo by URL — Telegram fetches it itself, so no download/re-upload
+ * round-trip is needed. Used for a device event's live verification snapshot
+ * (a Hik-Connect cloud URL), as opposed to sendTelegramPhoto()'s buffer upload
+ * (used for an employee's own stored profile photo).
+ */
+export async function sendTelegramPhotoByUrl(chatId: string, photoUrl: string, caption?: string): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN) {
+    logger.warn(`Telegram: TELEGRAM_BOT_TOKEN not set — skipping photo-by-url send to chat ${chatId}`);
+    return;
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, photo: photoUrl, caption }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Telegram sendPhoto (by url) failed (${response.status}): ${body}`);
+  }
+}
+
 /** Text-only notification — used when the employee has no stored photo. */
 export async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN) {

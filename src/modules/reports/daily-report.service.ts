@@ -29,12 +29,17 @@ function formatTime(value: Date | null | undefined): string | null {
   return `${pad(tashkent.getUTCHours())}:${pad(tashkent.getUTCMinutes())}`;
 }
 
-export async function getDailyAttendanceReport(organizationId: string, date: Date): Promise<DailyReportRow[]> {
+export async function getDailyAttendanceReport(organizationId: string, date: Date, deviceId?: string): Promise<DailyReportRow[]> {
   const nextDate = new Date(date.getTime() + 86_400_000);
 
   const [employees, attendanceRows, onLeaveIds] = await Promise.all([
     prisma.employee.findMany({
-      where: { organizationId, deletedAt: null, status: "ACTIVE" },
+      where: {
+        organizationId,
+        deletedAt: null,
+        status: "ACTIVE",
+        ...(deviceId ? { deviceSyncs: { some: { deviceId, status: "SYNCED" } } } : {}),
+      },
       include: { shift: { select: { workingHoursPerDay: true } } },
       orderBy: { fullName: "asc" },
     }),
