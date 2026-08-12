@@ -38,6 +38,8 @@ export const listEmployeesQuerySchema = z.object({
   departmentId: z.string().uuid().optional(),
   status: z.nativeEnum(EmployeeStatus).optional(),
   deleted: z.enum(["true", "false"]).optional(),
+  // Only employees synced (DeviceEmployeeSync status=SYNCED) to this device.
+  deviceId: z.string().uuid().optional(),
 });
 export type ListEmployeesQuery = z.infer<typeof listEmployeesQuerySchema>;
 

@@ -31,6 +31,9 @@ export const updateDeviceSchema = z.object({
   isapiUsername: z.string().max(100).optional(),
   isapiPassword: z.string().max(200).optional(),
   attendanceDirection: z.nativeEnum(DeviceAttendanceDirection).optional(),
+  // Telegram group this device's check-in/check-out events are sent to —
+  // null clears it (falls back to the organization's default chat).
+  telegramChatId: z.string().max(64).nullable().optional(),
 });
 export type UpdateDeviceDto = z.infer<typeof updateDeviceSchema>;
 

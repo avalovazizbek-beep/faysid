@@ -11,7 +11,8 @@ import { encryptSecret, decryptSecret } from "../../common/secret-crypto";
 import { CreateDeviceDto, UpdateDeviceDto } from "./device.dto";
 import * as isapi from "./hikvision-isapi";
 import * as hikConnect from "../hikconnect/hikconnect-api";
-import { getHikConnectCredentials } from "../platform-settings/platform-settings.service";
+import { getHikConnectCredentials as getPlatformHikConnectCredentials } from "../platform-settings/platform-settings.service";
+import { getOrgHikConnectCredentials } from "./device-hikconnect.service";
 import { createEmployee } from "../employee/employee.service";
 
 /** Never return the encrypted password; expose only whether one is configured. */
@@ -34,10 +35,13 @@ function isapiTarget(device: Device): isapi.HikvisionDeviceTarget | null {
  * Preferred path when set — reaches the device through Hik-Connect's cloud
  * proxypass instead of direct ISAPI, so it works regardless of CGNAT/
  * port-forwarding. Falls back to isapiTarget() (direct LAN ISAPI) when unset.
+ * Tries the organization's own Hik-Connect account first (self-service,
+ * connected from the Devices page), then Super Admin's platform-wide account
+ * (the older manual-assignment flow) — so either onboarding path keeps working.
  */
 async function hikConnectTarget(device: Device): Promise<{ credentials: hikConnect.HikConnectCredentials; deviceId: string } | null> {
   if (device.vendor !== "HIKVISION" || !device.hikConnectDeviceId) return null;
-  const credentials = await getHikConnectCredentials();
+  const credentials = (await getOrgHikConnectCredentials(device.organizationId)) ?? (await getPlatformHikConnectCredentials());
   if (!credentials) return null;
   return { credentials, deviceId: device.hikConnectDeviceId };
 }

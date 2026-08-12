@@ -114,19 +114,28 @@ function computeOvertimeMinutes(workedMinutes: number | null, workingHoursPerDay
 export async function listAttendance(organizationId: string, query: ListAttendanceQuery) {
   const { page, limit, skip } = parsePagination(query);
 
+  if (query.deviceId) {
+    const device = await prisma.device.findFirst({ where: { id: query.deviceId, organizationId, deletedAt: null } });
+    if (!device) {
+      throw ApiError.badRequest("Selected device does not belong to this organization");
+    }
+  }
+
+  const employeeConditions: Prisma.EmployeeWhereInput[] = [];
+  if (query.search) {
+    employeeConditions.push({ OR: [{ fullName: { contains: query.search } }, { employeeCode: { contains: query.search } }] });
+  }
+  if (query.deviceId) {
+    employeeConditions.push({ deviceSyncs: { some: { deviceId: query.deviceId, status: "SYNCED" } } });
+  }
+
   const where: Prisma.AttendanceWhereInput = {
     organizationId,
     deletedAt: null,
     ...(query.employeeId ? { employeeId: query.employeeId } : {}),
     ...(query.type ? { type: query.type } : {}),
     ...(query.lateOnly === "true" ? { isLate: true } : {}),
-    ...(query.search
-      ? {
-          employee: {
-            OR: [{ fullName: { contains: query.search } }, { employeeCode: { contains: query.search } }],
-          },
-        }
-      : {}),
+    ...(employeeConditions.length > 0 ? { employee: { AND: employeeConditions } } : {}),
     ...(query.dateFrom || query.dateTo
       ? {
           date: {

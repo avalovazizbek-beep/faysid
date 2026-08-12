@@ -4,7 +4,8 @@ import { logger } from "../config/logger";
 import { decryptSecret } from "../common/secret-crypto";
 import { searchAcsEvents, type HikvisionAttendanceEvent } from "../modules/device/hikvision-isapi";
 import * as hikConnect from "../modules/hikconnect/hikconnect-api";
-import { getHikConnectCredentials } from "../modules/platform-settings/platform-settings.service";
+import { getHikConnectCredentials as getPlatformHikConnectCredentials } from "../modules/platform-settings/platform-settings.service";
+import { getOrgHikConnectCredentials } from "../modules/device/device-hikconnect.service";
 import { recordDeviceAttendanceEvent } from "../modules/hikvision-webhook/attendance-recorder";
 
 const INITIAL_LOOKBACK_MS = 5 * 60_000;
@@ -45,14 +46,20 @@ export async function runHikvisionAttendancePoll(): Promise<void> {
   });
   if (devices.length === 0) return;
 
-  const hikConnectCredentials = await getHikConnectCredentials();
-
   for (const device of devices) {
     const endTime = new Date();
     const startTime = device.lastPolledEventAt ?? new Date(endTime.getTime() - INITIAL_LOOKBACK_MS);
 
     try {
       let events: HikvisionAttendanceEvent[];
+      // Each device can belong to a different organization, each with its own
+      // Hik-Connect account, so credentials are resolved per-device (org's own
+      // account first, then Super Admin's platform-wide account) rather than
+      // once for the whole batch. hikconnect-api.ts already caches the login
+      // token per appKey, so this costs nothing extra beyond the first poll.
+      const hikConnectCredentials = device.hikConnectDeviceId
+        ? ((await getOrgHikConnectCredentials(device.organizationId)) ?? (await getPlatformHikConnectCredentials()))
+        : null;
       if (device.hikConnectDeviceId && hikConnectCredentials) {
         events = await hikConnect.searchDeviceEvents(hikConnectCredentials, device.hikConnectDeviceId, startTime, endTime);
       } else if (device.isapiUsername && device.isapiPasswordEnc) {

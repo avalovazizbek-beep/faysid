@@ -32,6 +32,13 @@ async function assertShiftBelongsToOrg(organizationId: string, shiftId: string) 
   }
 }
 
+async function assertDeviceBelongsToOrg(organizationId: string, deviceId: string) {
+  const device = await prisma.device.findFirst({ where: { id: deviceId, organizationId, deletedAt: null } });
+  if (!device) {
+    throw ApiError.badRequest("Selected device does not belong to this organization");
+  }
+}
+
 export async function createEmployee(organizationId: string, dto: CreateEmployeeDto, photoUrl?: string) {
   // The DB unique constraint is on (organizationId, employeeCode) regardless
   // of soft-delete status — a deleted employee's code still blocks reuse at
@@ -68,11 +75,14 @@ export async function createEmployee(organizationId: string, dto: CreateEmployee
 export async function listEmployees(organizationId: string, query: ListEmployeesQuery) {
   const { page, limit, skip } = parsePagination(query);
 
+  if (query.deviceId) await assertDeviceBelongsToOrg(organizationId, query.deviceId);
+
   const where: Prisma.EmployeeWhereInput = {
     organizationId,
     deletedAt: query.deleted === "true" ? { not: null } : null,
     ...(query.departmentId ? { departmentId: query.departmentId } : {}),
     ...(query.status ? { status: query.status } : {}),
+    ...(query.deviceId ? { deviceSyncs: { some: { deviceId: query.deviceId, status: "SYNCED" } } } : {}),
     ...(query.search
       ? {
           OR: [

@@ -30,19 +30,24 @@ async function readEmployeePhoto(photoUrl: string): Promise<Buffer | null> {
 }
 
 /**
- * Real-time "xodim keldi/ketdi" notification to the org's Telegram chat
- * (org.telegramChatId — the same destination as the 18:00 daily report).
- * Best-effort: a failure here must never undo the attendance record that was
- * already successfully saved.
+ * Real-time "xodim keldi/ketdi" notification — sent to the device's own bound
+ * Telegram group (Device.telegramChatId) when it has one, otherwise falls
+ * back to the organization's default chat (org.telegramChatId — the same
+ * destination as the 18:00 daily report). Best-effort: a failure here must
+ * never undo the attendance record that was already successfully saved.
  */
 async function notifyTelegramAttendance(
-  organizationId: string,
+  device: { organizationId: string; telegramChatId?: string | null },
   employee: { fullName: string; photoUrl: string | null },
   isCheckOut: boolean,
 ): Promise<void> {
   try {
-    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { telegramChatId: true } });
-    if (!org?.telegramChatId) return;
+    let chatId = device.telegramChatId ?? null;
+    if (!chatId) {
+      const org = await prisma.organization.findUnique({ where: { id: device.organizationId }, select: { telegramChatId: true } });
+      chatId = org?.telegramChatId ?? null;
+    }
+    if (!chatId) return;
 
     const emoji = isCheckOut ? "🔴" : "🟢";
     const label = isCheckOut ? "Chiqdi" : "Keldi";
@@ -50,12 +55,12 @@ async function notifyTelegramAttendance(
 
     const photoBuffer = employee.photoUrl ? await readEmployeePhoto(employee.photoUrl) : null;
     if (photoBuffer) {
-      await sendTelegramPhoto(org.telegramChatId, photoBuffer, caption);
+      await sendTelegramPhoto(chatId, photoBuffer, caption);
     } else {
-      await sendTelegramMessage(org.telegramChatId, caption);
+      await sendTelegramMessage(chatId, caption);
     }
   } catch (error) {
-    logger.warn(`Telegram attendance notification failed for organization ${organizationId}: ${error}`);
+    logger.warn(`Telegram attendance notification failed for organization ${device.organizationId}: ${error}`);
   }
 }
 
@@ -67,7 +72,12 @@ async function notifyTelegramAttendance(
  * employeeNo + attendanceStatus, what happens next is identical.
  */
 export async function recordDeviceAttendanceEvent(
-  device: { id: string; organizationId: string; attendanceDirection?: "AUTO" | "CHECK_IN_ONLY" | "CHECK_OUT_ONLY" },
+  device: {
+    id: string;
+    organizationId: string;
+    attendanceDirection?: "AUTO" | "CHECK_IN_ONLY" | "CHECK_OUT_ONLY";
+    telegramChatId?: string | null;
+  },
   employeeNo: string,
   attendanceStatus: string,
   source: "webhook" | "poll",
@@ -142,7 +152,7 @@ export async function recordDeviceAttendanceEvent(
         entityId: employee.id,
         metadata: { source },
       });
-      if (!options?.skipTelegram) await notifyTelegramAttendance(device.organizationId, employee, true);
+      if (!options?.skipTelegram) await notifyTelegramAttendance(device, employee, true);
     } else if (isCheckIn) {
       await checkIn(device.organizationId, { employeeId: employee.id, type: "FACE" });
       logger.info(`Hikvision ${source}: recorded check-in for employee ${employee.id} via device ${device.id}`);
@@ -153,7 +163,7 @@ export async function recordDeviceAttendanceEvent(
         entityId: employee.id,
         metadata: { source },
       });
-      if (!options?.skipTelegram) await notifyTelegramAttendance(device.organizationId, employee, false);
+      if (!options?.skipTelegram) await notifyTelegramAttendance(device, employee, false);
     } else {
       logger.warn(`Hikvision ${source}: unrecognized attendanceStatus "${attendanceStatus}" for employee ${employee.id}`);
     }

@@ -21,5 +21,7 @@ export const listAttendanceQuerySchema = z.object({
   type: z.nativeEnum(AttendanceType).optional(),
   lateOnly: z.enum(["true", "false"]).optional(),
   search: z.string().optional(),
+  // Only attendance for employees synced (DeviceEmployeeSync status=SYNCED) to this device.
+  deviceId: z.string().uuid().optional(),
 });
 export type ListAttendanceQuery = z.infer<typeof listAttendanceQuerySchema>;

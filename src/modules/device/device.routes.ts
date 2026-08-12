@@ -32,10 +32,85 @@ import {
   syncDeviceHandler,
   updateDeviceHandler,
 } from "./device.controller";
+import { cloudDeviceParamSchema, connectCloudDeviceSchema, updateHikConnectSettingsSchema } from "./device-hikconnect.dto";
+import {
+  connectCloudDeviceHandler,
+  getHikConnectSettingsHandler,
+  listCloudDevicesHandler,
+  testHikConnectHandler,
+  updateHikConnectSettingsHandler,
+} from "./device-hikconnect.controller";
 
 const router = Router();
 
 router.use(authenticate, requireTenant, authorize(UserRole.ORG_ADMIN, UserRole.STAFF));
+
+/**
+ * @openapi
+ * /devices/hikconnect/settings:
+ *   get:
+ *     summary: This organization's own Hik-Connect for Teams credentials
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Hik-Connect settings (secret masked) }
+ *   patch:
+ *     summary: Update this organization's own Hik-Connect credentials (Organization Admin only)
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Updated Hik-Connect settings }
+ */
+router.get("/hikconnect/settings", getHikConnectSettingsHandler);
+router.patch(
+  "/hikconnect/settings",
+  authorize(UserRole.ORG_ADMIN),
+  blockIfReadOnly,
+  validate({ body: updateHikConnectSettingsSchema }),
+  updateHikConnectSettingsHandler,
+);
+
+/**
+ * @openapi
+ * /devices/hikconnect/test:
+ *   post:
+ *     summary: Test this organization's configured Hik-Connect credentials with a real API call
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Real connection test result }
+ */
+router.post("/hikconnect/test", testHikConnectHandler);
+
+/**
+ * @openapi
+ * /devices/hikconnect/cloud-devices:
+ *   get:
+ *     summary: Every terminal in this organization's own Hik-Connect account, flagged with local connection status
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Hik-Connect cloud devices }
+ */
+router.get("/hikconnect/cloud-devices", listCloudDevicesHandler);
+
+/**
+ * @openapi
+ * /devices/hikconnect/cloud-devices/{hikConnectDeviceId}/connect:
+ *   post:
+ *     summary: Connect one of this organization's own Hik-Connect devices into a local Device row (Organization Admin only)
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: The organization's Device row for this Hik-Connect device }
+ */
+router.post(
+  "/hikconnect/cloud-devices/:hikConnectDeviceId/connect",
+  authorize(UserRole.ORG_ADMIN),
+  blockIfReadOnly,
+  validate({ params: cloudDeviceParamSchema, body: connectCloudDeviceSchema }),
+  connectCloudDeviceHandler,
+);
 
 /**
  * @openapi
