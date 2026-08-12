@@ -18,17 +18,16 @@ export async function getPlatformSettings() {
   return {
     hikConnectAppKey: row.hikConnectAppKey,
     hasHikConnectSecret: Boolean(row.hikConnectAppSecretEnc),
-    hikConnectApiBaseUrl: row.hikConnectApiBaseUrl,
+    hikConnectRegion: row.hikConnectRegion,
   };
 }
 
 export async function updatePlatformSettings(dto: UpdatePlatformSettingsDto) {
   await ensureRow();
 
-  const data: { hikConnectAppKey?: string | null; hikConnectAppSecretEnc?: string | null; hikConnectApiBaseUrl?: string | null } =
-    {};
+  const data: { hikConnectAppKey?: string | null; hikConnectAppSecretEnc?: string | null; hikConnectRegion?: string | null } = {};
   if (dto.hikConnectAppKey !== undefined) data.hikConnectAppKey = dto.hikConnectAppKey;
-  if (dto.hikConnectApiBaseUrl !== undefined) data.hikConnectApiBaseUrl = dto.hikConnectApiBaseUrl;
+  if (dto.hikConnectRegion !== undefined) data.hikConnectRegion = dto.hikConnectRegion;
   if (dto.hikConnectAppSecret !== undefined) {
     data.hikConnectAppSecretEnc = dto.hikConnectAppSecret ? encryptSecret(dto.hikConnectAppSecret) : null;
   }
@@ -40,15 +39,22 @@ export async function updatePlatformSettings(dto: UpdatePlatformSettingsDto) {
   return getPlatformSettings();
 }
 
-export async function testHikConnect() {
+/** Reads the platform-wide Hik-Connect credentials — used by device.service.ts and the poll jobs. */
+export async function getHikConnectCredentials(): Promise<hikConnect.HikConnectCredentials | null> {
   const row = await ensureRow();
-  if (!row.hikConnectAppKey || !row.hikConnectAppSecretEnc || !row.hikConnectApiBaseUrl) {
-    throw ApiError.badRequest("Hik-Connect AppKey, AppSecret va API manzili to'liq kiritilmagan");
-  }
-
-  return hikConnect.testConnection({
+  if (!row.hikConnectAppKey || !row.hikConnectAppSecretEnc) return null;
+  return {
     appKey: row.hikConnectAppKey,
     appSecret: decryptSecret(row.hikConnectAppSecretEnc),
-    apiBaseUrl: row.hikConnectApiBaseUrl,
-  });
+    region: row.hikConnectRegion,
+  };
+}
+
+export async function testHikConnect() {
+  const credentials = await getHikConnectCredentials();
+  if (!credentials) {
+    throw ApiError.badRequest("Hik-Connect AppKey va AppSecret to'liq kiritilmagan");
+  }
+
+  return hikConnect.testConnection(credentials);
 }

@@ -181,7 +181,7 @@ export interface HikvisionAttendanceEvent {
  * explicit offset instead of "Z"). The device's own clock is local Uzbekistan
  * time (UTC+5, no DST), so render the wall-clock time in that zone.
  */
-function formatIsapiTime(date: Date): string {
+export function formatIsapiTime(date: Date): string {
   const tashkent = new Date(date.getTime() + 5 * 60 * 60_000);
   const pad = (n: number) => String(n).padStart(2, "0");
   const y = tashkent.getUTCFullYear();
@@ -374,7 +374,7 @@ export async function fetchDevicePersonPhoto(device: HikvisionDeviceTarget, pers
   }
 }
 
-async function readPhotoBuffer(photoUrl: string): Promise<Buffer | null> {
+export async function readPhotoBuffer(photoUrl: string): Promise<Buffer | null> {
   try {
     // photoUrl is always "/uploads/employees/<file>" (see middlewares/upload.ts)
     // — resolve it against the same uploads root the backend already serves.

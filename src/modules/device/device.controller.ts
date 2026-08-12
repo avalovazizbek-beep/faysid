@@ -3,6 +3,11 @@ import { asyncHandler } from "../../common/async-handler";
 import { sendCreated, sendSuccess } from "../../common/api-response";
 import * as deviceService from "./device.service";
 
+export const listAvailableHikConnectDevicesHandler = asyncHandler(async (_req: Request, res: Response) => {
+  const devices = await deviceService.listAvailableHikConnectDevices();
+  sendSuccess(res, devices);
+});
+
 export const createDeviceHandler = asyncHandler(async (req: Request, res: Response) => {
   const device = await deviceService.createDevice(req.tenantId!, req.body);
   sendCreated(res, device);

@@ -316,15 +316,15 @@ model RefreshToken {
 model PlatformSettings {
   id Int @id @default(1)
 
-  // Hik-Connect / Hikvision Open Platform cloud credentials — an alternative
-  // to the local ISAPI client (hikvision-isapi.ts) for devices reachable only
-  // via Hikvision's own cloud relay (e.g. behind CGNAT, no port-forward
-  // possible). AppSecret is AES-256-GCM encrypted at rest.
+  // Hik-Connect for Teams cloud credentials — reaches a device's ISAPI
+  // directly via video/v1/isapi/proxypass, through Hikvision's own cloud
+  // relay, regardless of CGNAT/port-forward. AppSecret is AES-256-GCM
+  // encrypted at rest.
   hikConnectAppKey       String?
   hikConnectAppSecretEnc String?
-  // The API gateway address shown on the developer's Open Platform dashboard
-  // — not guessable/hardcodable, varies per account/region.
-  hikConnectApiBaseUrl   String?
+  // One of hikconnect-api.ts's REGIONS keys (russia/singapore_india/europe/
+  // south_america/north_america), or null to try every region at login.
+  hikConnectRegion       String?
 
   updatedAt DateTime @updatedAt
 
@@ -482,11 +482,18 @@ model Device {
   lastSeenAt      DateTime?
 
   // Device-local ISAPI admin login (Hikvision), needed to push/pull real data
-  // once the device is reachable (e.g. via port-forwarding). Password is
-  // AES-256-GCM encrypted at rest — see common/secret-crypto.ts — never stored
-  // or returned as plaintext.
+  // when the backend can reach the device directly (e.g. same LAN or
+  // port-forwarding). Password is AES-256-GCM encrypted at rest — see
+  // common/secret-crypto.ts — never stored or returned as plaintext.
   isapiUsername    String?
   isapiPasswordEnc String?
+
+  // This device's ID in the platform-wide Hik-Connect for Teams cloud
+  // account (see platform-settings) — when set, device.service.ts routes
+  // ISAPI operations through hikconnect-api.ts's proxypass instead of direct
+  // ISAPI, which works regardless of CGNAT/port-forwarding. Takes priority
+  // over isapiUsername/isapiPasswordEnc when both are present.
+  hikConnectDeviceId String?
 
   // Cursor for the ISAPI attendance-polling fallback (jobs/hikvision-attendance-poll.job.ts)
   // — the AcsEvent search window's start time for this device's next poll.

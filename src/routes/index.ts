@@ -19,7 +19,6 @@ import calendarRoutes from "../modules/calendar/calendar.routes";
 import orgSettingsRoutes from "../modules/org-settings/org-settings.routes";
 import employeeApplicationRoutes from "../modules/employee-applications/employee-application.routes";
 import platformSettingsRoutes from "../modules/platform-settings/platform-settings.routes";
-import lokalServerDownloadRoutes from "../modules/lokal-server-download/lokal-server-download.routes";
 
 const router = Router();
 
@@ -47,6 +46,5 @@ router.use("/calendar", calendarRoutes);
 router.use("/org/settings", orgSettingsRoutes);
 router.use("/employee-applications", employeeApplicationRoutes);
 router.use("/admin/settings", platformSettingsRoutes);
-router.use("/lokal-server", lokalServerDownloadRoutes);
 
 export default router;

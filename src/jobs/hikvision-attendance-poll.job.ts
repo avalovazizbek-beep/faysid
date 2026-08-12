@@ -2,54 +2,72 @@ import cron from "node-cron";
 import { prisma } from "../config/prisma";
 import { logger } from "../config/logger";
 import { decryptSecret } from "../common/secret-crypto";
-import { searchAcsEvents } from "../modules/device/hikvision-isapi";
+import { searchAcsEvents, type HikvisionAttendanceEvent } from "../modules/device/hikvision-isapi";
+import * as hikConnect from "../modules/hikconnect/hikconnect-api";
+import { getHikConnectCredentials } from "../modules/platform-settings/platform-settings.service";
 import { recordDeviceAttendanceEvent } from "../modules/hikvision-webhook/attendance-recorder";
 
 const INITIAL_LOOKBACK_MS = 5 * 60_000;
 
+function dedupe(events: HikvisionAttendanceEvent[]): HikvisionAttendanceEvent[] {
+  // A single physical scan can produce more than one identical log entry on
+  // the device (e.g. a "verify" and a "door open" record for the same
+  // instant). Without deduping, two same-timestamp entries for one employee
+  // would flip check-in -> check-out on the very same scan when direction has
+  // to be inferred (see attendance-recorder.ts). Keep only the first entry
+  // per (employeeNo, time) pair.
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    const key = `${event.employeeNo}|${event.time}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Fallback attendance capture: instead of waiting for the device to push
  * events via its HTTP Listening webhook (which may never be configured
- * correctly on a given device/firmware), actively pull its access-control
- * event log over ISAPI. Runs independently of whether the webhook ever
+ * correctly on a given device/firmware), actively pulls its access-control
+ * event log — via Hik-Connect cloud proxypass when the device is bound to
+ * one, else direct ISAPI. Runs independently of whether the webhook ever
  * fires — whichever path delivers an event first "wins" (the attendance
  * service's check-in/check-out conflict is harmless idempotent noise if
  * both eventually see the same event).
  */
 export async function runHikvisionAttendancePoll(): Promise<void> {
   const devices = await prisma.device.findMany({
-    where: { deletedAt: null, vendor: "HIKVISION", isapiUsername: { not: null }, isapiPasswordEnc: { not: null } },
+    where: {
+      deletedAt: null,
+      vendor: "HIKVISION",
+      OR: [{ hikConnectDeviceId: { not: null } }, { isapiUsername: { not: null }, isapiPasswordEnc: { not: null } }],
+    },
   });
+  if (devices.length === 0) return;
+
+  const hikConnectCredentials = await getHikConnectCredentials();
 
   for (const device of devices) {
-    if (!device.isapiUsername || !device.isapiPasswordEnc) continue;
-
     const endTime = new Date();
     const startTime = device.lastPolledEventAt ?? new Date(endTime.getTime() - INITIAL_LOOKBACK_MS);
 
     try {
-      const target = {
-        ipAddress: device.ipAddress,
-        port: device.port,
-        isapiUsername: device.isapiUsername,
-        isapiPassword: decryptSecret(device.isapiPasswordEnc),
-      };
-      const events = await searchAcsEvents(target, startTime, endTime);
+      let events: HikvisionAttendanceEvent[];
+      if (device.hikConnectDeviceId && hikConnectCredentials) {
+        events = await hikConnect.searchDeviceEvents(hikConnectCredentials, device.hikConnectDeviceId, startTime, endTime);
+      } else if (device.isapiUsername && device.isapiPasswordEnc) {
+        const target = {
+          ipAddress: device.ipAddress,
+          port: device.port,
+          isapiUsername: device.isapiUsername,
+          isapiPassword: decryptSecret(device.isapiPasswordEnc),
+        };
+        events = await searchAcsEvents(target, startTime, endTime);
+      } else {
+        continue;
+      }
 
-      // A single physical scan can produce more than one identical log entry
-      // on the device (e.g. a "verify" and a "door open" record for the same
-      // instant). Without deduping, two same-timestamp entries for one
-      // employee would flip check-in -> check-out on the very same scan when
-      // direction has to be inferred (see attendance-recorder.ts). Keep only
-      // the first entry per (employeeNo, time) pair.
-      const seen = new Set<string>();
-      const deduped = events.filter((event) => {
-        const key = `${event.employeeNo}|${event.time}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-
+      const deduped = dedupe(events);
       for (const event of deduped) {
         await recordDeviceAttendanceEvent(device, event.employeeNo, event.attendanceStatus, "poll");
       }

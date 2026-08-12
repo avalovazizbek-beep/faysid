@@ -21,6 +21,7 @@ import {
   getDeviceHandler,
   heartbeatDeviceHandler,
   importDeviceUserHandler,
+  listAvailableHikConnectDevicesHandler,
   listDeviceSyncsHandler,
   listDevicesHandler,
   listDeviceUsersHandler,
@@ -54,6 +55,18 @@ router.use(authenticate, requireTenant, authorize(UserRole.ORG_ADMIN, UserRole.S
 router.get("/", listDevicesHandler);
 router.post("/", blockIfReadOnly, validate({ body: createDeviceSchema }), createDeviceHandler);
 
+/**
+ * @openapi
+ * /devices/hikconnect/available:
+ *   get:
+ *     summary: Real list of access-control terminals in the platform-wide Hik-Connect account, for binding to a Device
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: List of Hik-Connect devices }
+ */
+router.get("/hikconnect/available", listAvailableHikConnectDevicesHandler);
+
 router.get("/:id", validate({ params: deviceIdParamSchema }), getDeviceHandler);
 router.patch("/:id", validate({ params: deviceIdParamSchema, body: updateDeviceSchema }), updateDeviceHandler);
 router.delete("/:id", validate({ params: deviceIdParamSchema }), deleteDeviceHandler);
@@ -62,7 +75,7 @@ router.delete("/:id", validate({ params: deviceIdParamSchema }), deleteDeviceHan
  * @openapi
  * /devices/{id}/heartbeat:
  *   post:
- *     summary: Report the device alive (real — used by the device or the desktop agent)
+ *     summary: Report the device alive (real)
  *     tags: [Devices]
  *     security: [{ bearerAuth: [] }]
  *     responses:
@@ -111,7 +124,7 @@ router.get("/:id/syncs", validate({ params: deviceIdParamSchema }), listDeviceSy
  * @openapi
  * /devices/{id}/employees-to-sync:
  *   get:
- *     summary: Real list of employees eligible to be pushed to the device (used by the desktop bridge)
+ *     summary: Real list of employees eligible to be pushed to the device
  *     tags: [Devices]
  *     security: [{ bearerAuth: [] }]
  *     responses:
@@ -151,7 +164,7 @@ router.post(
  * @openapi
  * /devices/{id}/syncs/{employeeId}/ack:
  *   post:
- *     summary: Report the real outcome of pushing one employee to the device (called by the desktop bridge)
+ *     summary: Report the real outcome of pushing one employee to the device
  *     tags: [Devices]
  *     security: [{ bearerAuth: [] }]
  *     responses:

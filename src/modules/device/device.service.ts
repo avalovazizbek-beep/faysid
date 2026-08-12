@@ -10,6 +10,8 @@ import { logger } from "../../config/logger";
 import { encryptSecret, decryptSecret } from "../../common/secret-crypto";
 import { CreateDeviceDto, UpdateDeviceDto } from "./device.dto";
 import * as isapi from "./hikvision-isapi";
+import * as hikConnect from "../hikconnect/hikconnect-api";
+import { getHikConnectCredentials } from "../platform-settings/platform-settings.service";
 import { createEmployee } from "../employee/employee.service";
 
 /** Never return the encrypted password; expose only whether one is configured. */
@@ -28,6 +30,18 @@ function isapiTarget(device: Device): isapi.HikvisionDeviceTarget | null {
   };
 }
 
+/**
+ * Preferred path when set — reaches the device through Hik-Connect's cloud
+ * proxypass instead of direct ISAPI, so it works regardless of CGNAT/
+ * port-forwarding. Falls back to isapiTarget() (direct LAN ISAPI) when unset.
+ */
+async function hikConnectTarget(device: Device): Promise<{ credentials: hikConnect.HikConnectCredentials; deviceId: string } | null> {
+  if (device.vendor !== "HIKVISION" || !device.hikConnectDeviceId) return null;
+  const credentials = await getHikConnectCredentials();
+  if (!credentials) return null;
+  return { credentials, deviceId: device.hikConnectDeviceId };
+}
+
 function toPrismaData<T extends { isapiPassword?: string }>(
   dto: T,
 ): Omit<T, "isapiPassword"> & { isapiPasswordEnc?: string } {
@@ -36,6 +50,19 @@ function toPrismaData<T extends { isapiPassword?: string }>(
     ...rest,
     ...(isapiPassword ? { isapiPasswordEnc: encryptSecret(isapiPassword) } : {}),
   };
+}
+
+/**
+ * Real list of access-control terminals in the platform-wide Hik-Connect
+ * account — used by the "Qurilmalar" page to let an admin pick a cloud
+ * device to bind (hikConnectDeviceId) instead of typing an IP manually.
+ */
+export async function listAvailableHikConnectDevices() {
+  const credentials = await getHikConnectCredentials();
+  if (!credentials) {
+    throw ApiError.badRequest("Hik-Connect sozlanmagan — avval Super Admin > Xavfsizlik sahifasida AppKey/AppSecret kiriting");
+  }
+  return hikConnect.listAccessDevices(credentials);
 }
 
 export async function createDevice(organizationId: string, dto: CreateDeviceDto) {
@@ -78,17 +105,27 @@ export async function heartbeat(organizationId: string, id: string) {
 }
 
 /**
- * Reconnect/status check. When ISAPI credentials are configured, this is a
- * real authenticated HTTP call to the device (proves the full network path +
- * login work, not just that a TCP port is open). Otherwise falls back to the
- * previous raw-TCP reachability check.
+ * Reconnect/status check. Prefers Hik-Connect cloud proxypass when the device
+ * is bound to one (works regardless of network topology), then falls back to
+ * direct ISAPI when credentials are configured (a real authenticated HTTP
+ * call, proving the full network path + login work, not just that a TCP port
+ * is open), then to a raw-TCP reachability check.
  */
 export async function reconnect(organizationId: string, id: string) {
   const device = await getOwnedDevice(organizationId, id);
+  const hc = await hikConnectTarget(device);
   const target = isapiTarget(device);
 
   let reachable: boolean;
-  if (target) {
+  if (hc) {
+    try {
+      await hikConnect.fetchDeviceInfo(hc.credentials, hc.deviceId);
+      reachable = true;
+    } catch (error) {
+      logger.warn(`Hik-Connect reconnect check failed for device ${id}: ${error}`);
+      reachable = false;
+    }
+  } else if (target) {
     try {
       await isapi.fetchDeviceInfo(target);
       reachable = true;
@@ -120,12 +157,13 @@ export async function reconnect(organizationId: string, id: string) {
   return sanitizeDevice(updated);
 }
 
-/** Simulated — no vendor SDK available to actually restart hardware. */
+/** Real remote reboot via Hik-Connect proxypass or direct ISAPI; simulated only when neither is configured. */
 export async function restart(organizationId: string, id: string, actorUserId?: string) {
   const device = await getOwnedDevice(organizationId, id);
+  const hc = await hikConnectTarget(device);
   const target = isapiTarget(device);
 
-  if (!target) {
+  if (!hc && !target) {
     await recordAuditLog({
       organizationId,
       userId: actorUserId,
@@ -136,12 +174,16 @@ export async function restart(organizationId: string, id: string, actorUserId?: 
     });
     return {
       simulated: true,
-      message: "ISAPI login/parol sozlanmagan — bu amal simulyatsiya qilindi. Qurilmaga ISAPI login/parol kiriting.",
+      message: "Hik-Connect yoki ISAPI login/parol sozlanmagan — bu amal simulyatsiya qilindi.",
     };
   }
 
   try {
-    await isapi.rebootDevice(target);
+    if (hc) {
+      await hikConnect.rebootDevice(hc.credentials, hc.deviceId);
+    } else if (target) {
+      await isapi.rebootDevice(target);
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.warn(`Device restart failed for device ${id}: ${errorMessage}`);
@@ -172,12 +214,14 @@ function eligibleEmployeesWhere(organizationId: string) {
 }
 
 /**
- * Pushes Face(photo)/Card data to the device. Real over ISAPI when the device
- * has isapiUsername/isapiPassword configured (Hikvision); otherwise falls
- * back to the previous simulated behavior (no vendor SDK/credentials to act on).
+ * Pushes Face(photo)/Card data to the device. Real over Hik-Connect proxypass
+ * when the device is bound to one, else real over direct ISAPI when
+ * isapiUsername/isapiPassword is configured; otherwise falls back to the
+ * previous simulated behavior (no vendor SDK/credentials to act on).
  */
 export async function sync(organizationId: string, id: string) {
   const device = await getOwnedDevice(organizationId, id);
+  const hc = await hikConnectTarget(device);
   const target = isapiTarget(device);
 
   const employees = await prisma.employee.findMany({
@@ -185,7 +229,7 @@ export async function sync(organizationId: string, id: string) {
     select: { id: true, employeeCode: true, fullName: true, cardNumber: true, photoUrl: true },
   });
 
-  if (!target) {
+  if (!hc && !target) {
     const results = await Promise.all(
       employees.map((employee) =>
         prisma.deviceEmployeeSync.upsert({
@@ -198,7 +242,7 @@ export async function sync(organizationId: string, id: string) {
     await recordAuditLog({ organizationId, action: "DEVICE_SYNC", entityType: "Device", entityId: id, metadata: { employeeCount: results.length, simulated: true } });
     return {
       simulated: true,
-      message: "ISAPI login/parol sozlanmagan — sinxronizatsiya simulyatsiya qilindi. Qurilmaning haqiqiy admin login/parolini kiriting.",
+      message: "Hik-Connect yoki ISAPI login/parol sozlanmagan — sinxronizatsiya simulyatsiya qilindi.",
       syncedCount: results.length,
     };
   }
@@ -207,12 +251,17 @@ export async function sync(organizationId: string, id: string) {
   let failed = 0;
   for (const employee of employees) {
     try {
-      await isapi.enrollEmployee(target, {
+      const payload = {
         employeeCode: employee.employeeCode,
         fullName: employee.fullName,
         cardNumber: employee.cardNumber,
         photoUrl: employee.photoUrl,
-      });
+      };
+      if (hc) {
+        await hikConnect.enrollEmployee(hc.credentials, hc.deviceId, payload);
+      } else if (target) {
+        await isapi.enrollEmployee(target, payload);
+      }
       await prisma.deviceEmployeeSync.upsert({
         where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
         create: { deviceId: device.id, employeeId: employee.id, status: "SYNCED", syncedAt: new Date() },
@@ -241,20 +290,21 @@ export async function sync(organizationId: string, id: string) {
 
   return {
     simulated: false,
-    message: `Haqiqiy ISAPI sinxronizatsiya yakunlandi: ${succeeded} muvaffaqiyatli, ${failed} xato.`,
+    message: `Haqiqiy sinxronizatsiya yakunlandi: ${succeeded} muvaffaqiyatli, ${failed} xato.`,
     syncedCount: succeeded,
     failedCount: failed,
   };
 }
 
 /**
- * Pushes one employee to every ISAPI-credentialed Hikvision device in the
- * organization — the "bind to device" action for when you just added/edited
- * one employee and don't want to resync everyone. The device's Person ID
- * ends up equal to employeeCode (see hikvision-isapi.enrollEmployee), which
- * is also the key the webhook matches incoming events against — so once
- * pushed, showing this employee's face at the device produces a real
- * attendance event with no separate device-side employee management needed.
+ * Pushes one employee to every Hik-Connect-bound or ISAPI-credentialed
+ * Hikvision device in the organization — the "bind to device" action for
+ * when you just added/edited one employee and don't want to resync everyone.
+ * The device's Person ID ends up equal to employeeCode (see enrollEmployee in
+ * hikvision-isapi.ts/hikconnect-api.ts), which is also the key the webhook
+ * matches incoming events against — so once pushed, showing this employee's
+ * face at the device produces a real attendance event with no separate
+ * device-side employee management needed.
  */
 export async function pushEmployeeToDevices(organizationId: string, employeeId: string) {
   const employee = await prisma.employee.findFirst({ where: { id: employeeId, organizationId, deletedAt: null } });
@@ -263,28 +313,39 @@ export async function pushEmployeeToDevices(organizationId: string, employeeId: 
   }
 
   const devices = await prisma.device.findMany({
-    where: { organizationId, deletedAt: null, vendor: "HIKVISION", isapiUsername: { not: null }, isapiPasswordEnc: { not: null } },
+    where: {
+      organizationId,
+      deletedAt: null,
+      vendor: "HIKVISION",
+      OR: [{ hikConnectDeviceId: { not: null } }, { isapiUsername: { not: null }, isapiPasswordEnc: { not: null } }],
+    },
   });
 
   if (devices.length === 0) {
     return {
       pushed: 0,
       results: [],
-      message: "ISAPI login/parol sozlangan Hikvision qurilma topilmadi. Avval 'Qurilmalar' sahifasida qurilmaga ISAPI login/parol kiriting.",
+      message: "Hik-Connect yoki ISAPI login/parol sozlangan Hikvision qurilma topilmadi. Avval 'Qurilmalar' sahifasida qurilmani ulang.",
     };
   }
 
   const results: { deviceId: string; deviceName: string; success: boolean; error?: string }[] = [];
   for (const device of devices) {
+    const hc = await hikConnectTarget(device);
     const target = isapiTarget(device);
-    if (!target) continue;
+    if (!hc && !target) continue;
     try {
-      await isapi.enrollEmployee(target, {
+      const payload = {
         employeeCode: employee.employeeCode,
         fullName: employee.fullName,
         cardNumber: employee.cardNumber,
         photoUrl: employee.photoUrl,
-      });
+      };
+      if (hc) {
+        await hikConnect.enrollEmployee(hc.credentials, hc.deviceId, payload);
+      } else if (target) {
+        await isapi.enrollEmployee(target, payload);
+      }
       await prisma.deviceEmployeeSync.upsert({
         where: { deviceId_employeeId: { deviceId: device.id, employeeId } },
         create: { deviceId: device.id, employeeId, status: "SYNCED", syncedAt: new Date() },
@@ -328,14 +389,15 @@ export async function pushEmployeeToDevices(organizationId: string, employeeId: 
  */
 export async function listDeviceUsers(organizationId: string, deviceId: string) {
   const device = await getOwnedDevice(organizationId, deviceId);
+  const hc = await hikConnectTarget(device);
   const target = isapiTarget(device);
-  if (!target) {
-    throw ApiError.badRequest("Bu qurilmada ISAPI login/parol sozlanmagan");
+  if (!hc && !target) {
+    throw ApiError.badRequest("Bu qurilmada Hik-Connect yoki ISAPI login/parol sozlanmagan");
   }
 
   let deviceUsers: isapi.HikvisionDeviceUser[];
   try {
-    deviceUsers = await isapi.searchDeviceUsers(target);
+    deviceUsers = hc ? await hikConnect.searchDeviceUsers(hc.credentials, hc.deviceId) : await isapi.searchDeviceUsers(target!);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.warn(`listDeviceUsers failed for device ${deviceId}: ${errorMessage}`);
@@ -398,7 +460,7 @@ export async function listDeviceSyncs(organizationId: string, deviceId: string) 
   });
 }
 
-/** Real list for the desktop bridge to push over ISAPI — same eligibility as sync() above. */
+/** Real list of employees eligible to be pushed to a device — same eligibility as sync() above. */
 export async function listEmployeesToSync(organizationId: string, deviceId: string) {
   await getOwnedDevice(organizationId, deviceId);
 
@@ -408,7 +470,7 @@ export async function listEmployeesToSync(organizationId: string, deviceId: stri
   });
 }
 
-/** Records the real outcome of a desktop-bridge push for one employee. */
+/** Records the real outcome of pushing one employee to a device. */
 export async function ackEmployeeSync(
   organizationId: string,
   deviceId: string,
