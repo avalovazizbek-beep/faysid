@@ -427,8 +427,8 @@ export async function listDeviceAttendance(organizationId: string, deviceId: str
  * Reads the device's own enrolled person list and reconciles it against
  * FaceHub employees by employeeCode (== the device's Person ID convention),
  * so an admin can see at a glance which device-side people already have a
- * matching site employee and which don't — no bulk "import" is needed since
- * the site is meant to stay the source of truth.
+ * matching site employee and which don't — see importAllDeviceUsers() below
+ * for pulling every unmatched one in at once.
  */
 export async function listDeviceUsers(organizationId: string, deviceId: string) {
   const device = await getOwnedDevice(organizationId, deviceId);
@@ -504,6 +504,61 @@ export async function importDeviceUser(organizationId: string, deviceId: string,
   });
 
   return employee;
+}
+
+/**
+ * Imports every device-enrolled person that doesn't already have a matching
+ * FaceHub employee — the bulk counterpart of importDeviceUser(), for
+ * terminals with hundreds of people already enrolled locally (a one-by-one
+ * click per person doesn't scale). Reuses importDeviceUser() itself so the
+ * per-person creation logic (photo fetch, DeviceEmployeeSync link) stays in
+ * one place; a single person's failure (e.g. a race on employeeCode) is
+ * recorded and skipped rather than aborting the whole batch.
+ */
+export async function importAllDeviceUsers(organizationId: string, deviceId: string) {
+  const device = await getOwnedDevice(organizationId, deviceId);
+  const hc = await hikConnectTarget(device);
+  const target = isapiTarget(device);
+  if (!hc && !target) {
+    throw ApiError.badRequest("Bu qurilmada Hik-Connect yoki ISAPI login/parol sozlanmagan");
+  }
+
+  let deviceUsers: isapi.HikvisionDeviceUser[];
+  try {
+    deviceUsers = hc ? await hikConnect.searchDeviceUsers(hc.credentials, hc.deviceId) : await isapi.searchDeviceUsers(target!);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.warn(`importAllDeviceUsers failed for device ${deviceId}: ${errorMessage}`);
+    throw new ApiError(502, `Qurilmaga ulanib bo'lmadi: ${errorMessage}`);
+  }
+
+  const existing = await prisma.employee.findMany({
+    where: { organizationId, deletedAt: null, employeeCode: { in: deviceUsers.map((u) => u.personId) } },
+    select: { employeeCode: true },
+  });
+  const existingCodes = new Set(existing.map((e) => e.employeeCode));
+  const toImport = deviceUsers.filter((u) => u.personId && !existingCodes.has(u.personId));
+
+  let imported = 0;
+  const errors: { personId: string; error: string }[] = [];
+  for (const user of toImport) {
+    try {
+      await importDeviceUser(organizationId, deviceId, user.personId, user.name);
+      imported += 1;
+    } catch (error) {
+      errors.push({ personId: user.personId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  await recordAuditLog({
+    organizationId,
+    action: "DEVICE_USERS_IMPORT_ALL",
+    entityType: "Device",
+    entityId: deviceId,
+    metadata: { total: deviceUsers.length, imported, failed: errors.length },
+  });
+
+  return { total: deviceUsers.length, imported, skipped: deviceUsers.length - toImport.length, failed: errors.length, errors: errors.slice(0, 20) };
 }
 
 export async function listDeviceSyncs(organizationId: string, deviceId: string) {

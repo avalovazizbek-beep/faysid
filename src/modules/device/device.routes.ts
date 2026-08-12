@@ -20,6 +20,7 @@ import {
   deleteDeviceHandler,
   getDeviceHandler,
   heartbeatDeviceHandler,
+  importAllDeviceUsersHandler,
   importDeviceUserHandler,
   listDeviceAttendanceHandler,
   listDeviceSyncsHandler,
@@ -236,6 +237,23 @@ router.get("/:id/employees-to-sync", validate({ params: deviceIdParamSchema }), 
  *       200: { description: Device Person IDs with matched employee (if any) }
  */
 router.get("/:id/device-users", validate({ params: deviceIdParamSchema }), listDeviceUsersHandler);
+
+/**
+ * @openapi
+ * /devices/{id}/device-users/import-all:
+ *   post:
+ *     summary: Import every device-enrolled person that has no matching FaceHub employee yet
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Import summary (total/imported/skipped/failed) }
+ */
+router.post(
+  "/:id/device-users/import-all",
+  blockIfReadOnly,
+  validate({ params: deviceIdParamSchema }),
+  importAllDeviceUsersHandler,
+);
 
 /**
  * @openapi
