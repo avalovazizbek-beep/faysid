@@ -21,11 +21,12 @@ import {
   getDeviceHandler,
   heartbeatDeviceHandler,
   importDeviceUserHandler,
-  listAvailableHikConnectDevicesHandler,
+  listDeviceAttendanceHandler,
   listDeviceSyncsHandler,
   listDevicesHandler,
   listDeviceUsersHandler,
   listEmployeesToSyncHandler,
+  pushEmployeeToDeviceHandler,
   reconnectDeviceHandler,
   restartDeviceHandler,
   syncDeviceHandler,
@@ -54,18 +55,6 @@ router.use(authenticate, requireTenant, authorize(UserRole.ORG_ADMIN, UserRole.S
  */
 router.get("/", listDevicesHandler);
 router.post("/", blockIfReadOnly, validate({ body: createDeviceSchema }), createDeviceHandler);
-
-/**
- * @openapi
- * /devices/hikconnect/available:
- *   get:
- *     summary: Real list of access-control terminals in the platform-wide Hik-Connect account, for binding to a Device
- *     tags: [Devices]
- *     security: [{ bearerAuth: [] }]
- *     responses:
- *       200: { description: List of Hik-Connect devices }
- */
-router.get("/hikconnect/available", listAvailableHikConnectDevicesHandler);
 
 router.get("/:id", validate({ params: deviceIdParamSchema }), getDeviceHandler);
 router.patch("/:id", validate({ params: deviceIdParamSchema, body: updateDeviceSchema }), updateDeviceHandler);
@@ -119,6 +108,35 @@ router.post("/:id/restart", validate({ params: deviceIdParamSchema }), restartDe
  */
 router.post("/:id/sync", validate({ params: deviceIdParamSchema }), syncDeviceHandler);
 router.get("/:id/syncs", validate({ params: deviceIdParamSchema }), listDeviceSyncsHandler);
+
+/**
+ * @openapi
+ * /devices/{id}/attendance:
+ *   get:
+ *     summary: Recent attendance for the employees synced to this device
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Recent Attendance rows for this device's synced employees }
+ */
+router.get("/:id/attendance", validate({ params: deviceIdParamSchema }), listDeviceAttendanceHandler);
+
+/**
+ * @openapi
+ * /devices/{id}/employees/{employeeId}/push:
+ *   post:
+ *     summary: Push one employee's Face/Card data to this one device (real)
+ *     tags: [Devices]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Real push result }
+ */
+router.post(
+  "/:id/employees/:employeeId/push",
+  blockIfReadOnly,
+  validate({ params: deviceEmployeeSyncParamSchema }),
+  pushEmployeeToDeviceHandler,
+);
 
 /**
  * @openapi

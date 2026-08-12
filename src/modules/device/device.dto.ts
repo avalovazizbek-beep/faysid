@@ -14,11 +14,6 @@ export const createDeviceSchema = z.object({
   // reconnect fall back to their previous simulated/TCP-only behavior.
   isapiUsername: z.string().max(100).optional(),
   isapiPassword: z.string().max(200).optional(),
-  // This device's ID in the platform-wide Hik-Connect for Teams cloud account
-  // (picked from GET /devices/hikconnect/available). When set, device.service.ts
-  // reaches the device through Hik-Connect's proxypass instead of direct ISAPI —
-  // works regardless of CGNAT/port-forwarding, takes priority over isapiUsername.
-  hikConnectDeviceId: z.string().max(100).nullable().optional(),
   // For setups with a separate entry-only/exit-only terminal instead of one
   // device at a single door. Defaults to inferring direction automatically.
   attendanceDirection: z.nativeEnum(DeviceAttendanceDirection).optional(),
@@ -35,7 +30,6 @@ export const updateDeviceSchema = z.object({
   firmwareVersion: z.string().max(50).optional(),
   isapiUsername: z.string().max(100).optional(),
   isapiPassword: z.string().max(200).optional(),
-  hikConnectDeviceId: z.string().max(100).nullable().optional(),
   attendanceDirection: z.nativeEnum(DeviceAttendanceDirection).optional(),
 });
 export type UpdateDeviceDto = z.infer<typeof updateDeviceSchema>;

@@ -17,3 +17,22 @@ export const testHikConnectHandler = asyncHandler(async (_req: Request, res: Res
   const result = await platformSettingsService.testHikConnect();
   sendSuccess(res, result);
 });
+
+export const listHikConnectDevicesHandler = asyncHandler(async (_req: Request, res: Response) => {
+  const devices = await platformSettingsService.listHikConnectDevicesWithAssignment();
+  sendSuccess(res, devices);
+});
+
+export const assignHikConnectDeviceHandler = asyncHandler(async (req: Request, res: Response) => {
+  const device = await platformSettingsService.assignHikConnectDevice(
+    req.params.hikConnectDeviceId,
+    req.body.organizationId,
+    req.body.name,
+  );
+  sendSuccess(res, device);
+});
+
+export const unassignHikConnectDeviceHandler = asyncHandler(async (req: Request, res: Response) => {
+  await platformSettingsService.unassignHikConnectDevice(req.params.hikConnectDeviceId);
+  sendSuccess(res, { message: "Unassigned" });
+});

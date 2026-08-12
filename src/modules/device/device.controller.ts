@@ -3,11 +3,6 @@ import { asyncHandler } from "../../common/async-handler";
 import { sendCreated, sendSuccess } from "../../common/api-response";
 import * as deviceService from "./device.service";
 
-export const listAvailableHikConnectDevicesHandler = asyncHandler(async (_req: Request, res: Response) => {
-  const devices = await deviceService.listAvailableHikConnectDevices();
-  sendSuccess(res, devices);
-});
-
 export const createDeviceHandler = asyncHandler(async (req: Request, res: Response) => {
   const device = await deviceService.createDevice(req.tenantId!, req.body);
   sendCreated(res, device);
@@ -56,6 +51,16 @@ export const syncDeviceHandler = asyncHandler(async (req: Request, res: Response
 export const listDeviceSyncsHandler = asyncHandler(async (req: Request, res: Response) => {
   const syncs = await deviceService.listDeviceSyncs(req.tenantId!, req.params.id);
   sendSuccess(res, syncs);
+});
+
+export const listDeviceAttendanceHandler = asyncHandler(async (req: Request, res: Response) => {
+  const attendance = await deviceService.listDeviceAttendance(req.tenantId!, req.params.id);
+  sendSuccess(res, attendance);
+});
+
+export const pushEmployeeToDeviceHandler = asyncHandler(async (req: Request, res: Response) => {
+  const result = await deviceService.pushEmployeeToDevice(req.tenantId!, req.params.id, req.params.employeeId);
+  sendSuccess(res, result);
 });
 
 export const listEmployeesToSyncHandler = asyncHandler(async (req: Request, res: Response) => {

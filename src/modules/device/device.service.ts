@@ -52,19 +52,6 @@ function toPrismaData<T extends { isapiPassword?: string }>(
   };
 }
 
-/**
- * Real list of access-control terminals in the platform-wide Hik-Connect
- * account — used by the "Qurilmalar" page to let an admin pick a cloud
- * device to bind (hikConnectDeviceId) instead of typing an IP manually.
- */
-export async function listAvailableHikConnectDevices() {
-  const credentials = await getHikConnectCredentials();
-  if (!credentials) {
-    throw ApiError.badRequest("Hik-Connect sozlanmagan — avval Super Admin > Xavfsizlik sahifasida AppKey/AppSecret kiriting");
-  }
-  return hikConnect.listAccessDevices(credentials);
-}
-
 export async function createDevice(organizationId: string, dto: CreateDeviceDto) {
   const device = await prisma.device.create({ data: { organizationId, ...toPrismaData(dto) } });
   return sanitizeDevice(device);
@@ -213,6 +200,53 @@ function eligibleEmployeesWhere(organizationId: string) {
   };
 }
 
+type EnrollableEmployee = { id: string; employeeCode: string; fullName: string; cardNumber: string | null; photoUrl: string | null };
+type DeviceReachability = {
+  hc: { credentials: hikConnect.HikConnectCredentials; deviceId: string } | null;
+  target: isapi.HikvisionDeviceTarget | null;
+};
+
+/**
+ * Enrolls one employee on one device (Hik-Connect proxypass preferred, else
+ * direct ISAPI) and records the real outcome on DeviceEmployeeSync — the
+ * shared core of sync() (all employees -> one device), pushEmployeeToDevices()
+ * (one employee -> every device), and pushEmployeeToDevice() (one -> one).
+ */
+async function enrollAndRecordSync(
+  device: Device,
+  { hc, target }: DeviceReachability,
+  employee: EnrollableEmployee,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = {
+      employeeCode: employee.employeeCode,
+      fullName: employee.fullName,
+      cardNumber: employee.cardNumber,
+      photoUrl: employee.photoUrl,
+    };
+    if (hc) {
+      await hikConnect.enrollEmployee(hc.credentials, hc.deviceId, payload);
+    } else if (target) {
+      await isapi.enrollEmployee(target, payload);
+    }
+    await prisma.deviceEmployeeSync.upsert({
+      where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
+      create: { deviceId: device.id, employeeId: employee.id, status: "SYNCED", syncedAt: new Date() },
+      update: { status: "SYNCED", syncedAt: new Date(), errorMessage: null },
+    });
+    return { success: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.warn(`Enroll failed for employee ${employee.id} on device ${device.id}: ${errorMessage}`);
+    await prisma.deviceEmployeeSync.upsert({
+      where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
+      create: { deviceId: device.id, employeeId: employee.id, status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
+      update: { status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
+    });
+    return { success: false, error: errorMessage.slice(0, 500) };
+  }
+}
+
 /**
  * Pushes Face(photo)/Card data to the device. Real over Hik-Connect proxypass
  * when the device is bound to one, else real over direct ISAPI when
@@ -250,34 +284,9 @@ export async function sync(organizationId: string, id: string) {
   let succeeded = 0;
   let failed = 0;
   for (const employee of employees) {
-    try {
-      const payload = {
-        employeeCode: employee.employeeCode,
-        fullName: employee.fullName,
-        cardNumber: employee.cardNumber,
-        photoUrl: employee.photoUrl,
-      };
-      if (hc) {
-        await hikConnect.enrollEmployee(hc.credentials, hc.deviceId, payload);
-      } else if (target) {
-        await isapi.enrollEmployee(target, payload);
-      }
-      await prisma.deviceEmployeeSync.upsert({
-        where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
-        create: { deviceId: device.id, employeeId: employee.id, status: "SYNCED", syncedAt: new Date() },
-        update: { status: "SYNCED", syncedAt: new Date(), errorMessage: null },
-      });
-      succeeded += 1;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.warn(`Hikvision sync failed for employee ${employee.id} on device ${id}: ${errorMessage}`);
-      await prisma.deviceEmployeeSync.upsert({
-        where: { deviceId_employeeId: { deviceId: device.id, employeeId: employee.id } },
-        create: { deviceId: device.id, employeeId: employee.id, status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
-        update: { status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
-      });
-      failed += 1;
-    }
+    const result = await enrollAndRecordSync(device, { hc, target }, employee);
+    if (result.success) succeeded += 1;
+    else failed += 1;
   }
 
   await recordAuditLog({
@@ -334,34 +343,8 @@ export async function pushEmployeeToDevices(organizationId: string, employeeId: 
     const hc = await hikConnectTarget(device);
     const target = isapiTarget(device);
     if (!hc && !target) continue;
-    try {
-      const payload = {
-        employeeCode: employee.employeeCode,
-        fullName: employee.fullName,
-        cardNumber: employee.cardNumber,
-        photoUrl: employee.photoUrl,
-      };
-      if (hc) {
-        await hikConnect.enrollEmployee(hc.credentials, hc.deviceId, payload);
-      } else if (target) {
-        await isapi.enrollEmployee(target, payload);
-      }
-      await prisma.deviceEmployeeSync.upsert({
-        where: { deviceId_employeeId: { deviceId: device.id, employeeId } },
-        create: { deviceId: device.id, employeeId, status: "SYNCED", syncedAt: new Date() },
-        update: { status: "SYNCED", syncedAt: new Date(), errorMessage: null },
-      });
-      results.push({ deviceId: device.id, deviceName: device.name, success: true });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.warn(`Push-to-device failed for employee ${employeeId} on device ${device.id}: ${errorMessage}`);
-      await prisma.deviceEmployeeSync.upsert({
-        where: { deviceId_employeeId: { deviceId: device.id, employeeId } },
-        create: { deviceId: device.id, employeeId, status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
-        update: { status: "FAILED", errorMessage: errorMessage.slice(0, 1000) },
-      });
-      results.push({ deviceId: device.id, deviceName: device.name, success: false, error: errorMessage.slice(0, 500) });
-    }
+    const result = await enrollAndRecordSync(device, { hc, target }, employee);
+    results.push({ deviceId: device.id, deviceName: device.name, success: result.success, error: result.error });
   }
 
   const succeeded = results.filter((r) => r.success).length;
@@ -378,6 +361,62 @@ export async function pushEmployeeToDevices(organizationId: string, employeeId: 
     results,
     message: `${succeeded}/${devices.length} qurilmaga muvaffaqiyatli yuborildi.`,
   };
+}
+
+/**
+ * Pushes one employee to exactly one device — the "qurilma tanlab, xodim
+ * qo'shish" action inside the device's own detail panel, as opposed to
+ * pushEmployeeToDevices() which fans out to every device in the org.
+ */
+export async function pushEmployeeToDevice(organizationId: string, deviceId: string, employeeId: string) {
+  const device = await getOwnedDevice(organizationId, deviceId);
+  const employee = await prisma.employee.findFirst({ where: { id: employeeId, organizationId, deletedAt: null } });
+  if (!employee) {
+    throw ApiError.notFound("Employee not found");
+  }
+
+  const hc = await hikConnectTarget(device);
+  const target = isapiTarget(device);
+  if (!hc && !target) {
+    throw ApiError.badRequest("Bu qurilmada Hik-Connect yoki ISAPI login/parol sozlanmagan");
+  }
+
+  const result = await enrollAndRecordSync(device, { hc, target }, employee);
+  await recordAuditLog({
+    organizationId,
+    action: "DEVICE_EMPLOYEE_PUSH",
+    entityType: "Employee",
+    entityId: employeeId,
+    metadata: { deviceId, success: result.success },
+  });
+
+  if (!result.success) {
+    throw new ApiError(502, `Qurilmaga yuborilmadi: ${result.error}`);
+  }
+  return { success: true, message: `${employee.fullName} "${device.name}" qurilmasiga muvaffaqiyatli yuborildi.` };
+}
+
+/**
+ * Recent attendance for the employees actually synced to this device
+ * (DeviceEmployeeSync) — the "davomat" section of the device's detail panel,
+ * so an admin can see this specific terminal's people's attendance without
+ * leaving the Devices page.
+ */
+export async function listDeviceAttendance(organizationId: string, deviceId: string) {
+  await getOwnedDevice(organizationId, deviceId);
+
+  const syncedEmployeeIds = await prisma.deviceEmployeeSync.findMany({
+    where: { deviceId, status: "SYNCED" },
+    select: { employeeId: true },
+  });
+  if (syncedEmployeeIds.length === 0) return [];
+
+  return prisma.attendance.findMany({
+    where: { organizationId, employeeId: { in: syncedEmployeeIds.map((s) => s.employeeId) }, deletedAt: null },
+    orderBy: { date: "desc" },
+    take: 50,
+    include: { employee: { select: { id: true, fullName: true, employeeCode: true } } },
+  });
 }
 
 /**
