@@ -351,7 +351,11 @@ export async function searchCertificateSnapshots(
     for (const record of records) {
       if (record.deviceId !== deviceId) continue;
       const pics = (record.acsSnapPicList as { snapPicUrl?: string }[] | undefined) ?? [];
-      const devSerialNo = record.devSerialNo as string | undefined;
+      // The real API returns devSerialNo as a JSON number, while searchDeviceEvents()
+      // stores AcsEvent's serialNo as a string (String(e.serialNo)) — without this
+      // coercion, Map<number, string> keys never match the string lookup key below,
+      // so every snapshot lookup silently missed (confirmed live: typeof was "number").
+      const devSerialNo = record.devSerialNo !== undefined && record.devSerialNo !== null ? String(record.devSerialNo) : undefined;
       if (devSerialNo && pics[0]?.snapPicUrl) snapshots.set(devSerialNo, pics[0].snapPicUrl);
     }
     if (records.length < pageSize || pageIndex * pageSize >= (data.totalNum ?? 0)) break;
