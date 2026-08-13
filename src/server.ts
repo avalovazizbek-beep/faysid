@@ -1,4 +1,5 @@
 import dns from "node:dns";
+import net from "node:net";
 import { createServer } from "node:http";
 import { createApp } from "./app";
 import { env } from "./config/env";
@@ -15,12 +16,16 @@ import { startTelegramRegistrationCodeCron } from "./jobs/telegram-registration-
 import { registerTelegramBotWebhook } from "./modules/telegram-bot/telegram-bot.service";
 
 // Some VPS hosts advertise an IPv6 route for outbound domains (Telegram,
-// Hik-Connect, ...) that doesn't actually work — Node's fetch (undici) tries
-// it before IPv4 and eats the full connect timeout on every request
-// (confirmed live: AggregateError [ETIMEDOUT] from internalConnectMultiple,
-// while `curl` to the same host succeeded instantly since it prefers IPv4).
-// Forcing IPv4-first here fixes every outbound fetch() call app-wide.
+// Hik-Connect, ...) that doesn't actually work — confirmed live on this exact
+// server: `curl -6 https://api.telegram.org` hangs to a dead end (no route),
+// while `curl -4` succeeds instantly. dns.setDefaultResultOrder alone wasn't
+// enough because Node's net.connect() "Happy Eyeballs" (RFC 8305) dual-stack
+// racing still attempted IPv6 regardless of lookup order and hung until
+// ETIMEDOUT (confirmed live via a direct `node -e fetch(...)` test that still
+// failed after the DNS-order fix alone). Disabling autoSelectFamily makes
+// net.connect() use only dns.lookup()'s first (IPv4) result, matching curl.
 dns.setDefaultResultOrder("ipv4first");
+net.setDefaultAutoSelectFamily(false);
 
 async function bootstrap(): Promise<void> {
   await prisma.$connect();
