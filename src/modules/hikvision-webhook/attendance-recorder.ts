@@ -3,7 +3,7 @@ import path from "node:path";
 import { prisma } from "../../config/prisma";
 import { logger } from "../../config/logger";
 import { recordAuditLog } from "../../common/audit-log";
-import { sendTelegramMessage, sendTelegramPhoto, sendTelegramPhotoByUrl } from "../../common/telegram";
+import { resolveNotifyBotToken, sendTelegramMessage, sendTelegramPhoto, sendTelegramPhotoByUrl, warnNoBotToken } from "../../common/telegram";
 import { checkIn, checkOut } from "../attendance/attendance.service";
 
 function startOfToday(): Date {
@@ -55,6 +55,12 @@ async function notifyTelegramAttendance(
     }
     if (!chatId) return;
 
+    const token = await resolveNotifyBotToken(device.organizationId);
+    if (!token) {
+      warnNoBotToken("attendance notification", chatId);
+      return;
+    }
+
     const emoji = isCheckOut ? "🔴" : "🟢";
     const label = isCheckOut ? "Chiqdi" : "Keldi";
     const captionLines = [`${emoji} ${label}`, `👤 ${employee.fullName}`];
@@ -64,7 +70,7 @@ async function notifyTelegramAttendance(
 
     if (snapshotUrl) {
       try {
-        await sendTelegramPhotoByUrl(chatId, snapshotUrl, caption);
+        await sendTelegramPhotoByUrl(token, chatId, snapshotUrl, caption);
         return;
       } catch (error) {
         logger.warn(`Telegram attendance notification: snapshot send failed, falling back: ${error}`);
@@ -73,9 +79,9 @@ async function notifyTelegramAttendance(
 
     const photoBuffer = employee.photoUrl ? await readEmployeePhoto(employee.photoUrl) : null;
     if (photoBuffer) {
-      await sendTelegramPhoto(chatId, photoBuffer, caption);
+      await sendTelegramPhoto(token, chatId, photoBuffer, caption);
     } else {
-      await sendTelegramMessage(chatId, caption);
+      await sendTelegramMessage(token, chatId, caption);
     }
   } catch (error) {
     logger.warn(`Telegram attendance notification failed for organization ${device.organizationId}: ${error}`);

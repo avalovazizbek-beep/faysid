@@ -4,7 +4,8 @@ import { logger } from "../config/logger";
 import { decryptSecret } from "../common/secret-crypto";
 import { fetchDeviceInfo } from "../modules/device/hikvision-isapi";
 import * as hikConnect from "../modules/hikconnect/hikconnect-api";
-import { getHikConnectCredentials } from "../modules/platform-settings/platform-settings.service";
+import { getHikConnectCredentials as getPlatformHikConnectCredentials } from "../modules/platform-settings/platform-settings.service";
+import { getOrgHikConnectCredentials } from "../modules/device/device-hikconnect.service";
 
 /**
  * Actively probes every Hikvision device bound to Hik-Connect or configured
@@ -23,10 +24,18 @@ export async function runHikvisionPoll(): Promise<void> {
   });
   if (devices.length === 0) return;
 
-  const hikConnectCredentials = await getHikConnectCredentials();
-
   for (const device of devices) {
     try {
+      // Each device can belong to a different organization with its own
+      // Hik-Connect account — resolve per-device (org's own account first,
+      // then Super Admin's platform-wide account), same as the other two
+      // Hik-Connect poll jobs. Missing this per-device resolution here meant
+      // org-connected devices were silently skipped by this job forever
+      // (never re-marked ONLINE), so device-offline.job.ts would flip them
+      // OFFLINE 5 minutes after the last manual "Reconnect" click.
+      const hikConnectCredentials = device.hikConnectDeviceId
+        ? ((await getOrgHikConnectCredentials(device.organizationId)) ?? (await getPlatformHikConnectCredentials()))
+        : null;
       if (device.hikConnectDeviceId && hikConnectCredentials) {
         await hikConnect.fetchDeviceInfo(hikConnectCredentials, device.hikConnectDeviceId);
       } else if (device.isapiUsername && device.isapiPasswordEnc) {

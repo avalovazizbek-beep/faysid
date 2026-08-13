@@ -115,14 +115,24 @@ model Organization {
   telegramChatId   String?
 
   // Per-organization Telegram bot for the employee self-registration flow
-  // (distinct from telegramChatId above, which is only the daily-report
-  // destination). Token is AES-256-GCM encrypted at rest — see
-  // common/secret-crypto.ts. webhookSecret is compared against Telegram's
-  // X-Telegram-Bot-Api-Secret-Token header to reject spoofed webhook calls.
+  // (distinct from telegramChatId above, which is the real-time check-in/
+  // check-out fallback destination for devices with no Telegram group of
+  // their own — daily reports are per-device, see Device.dailyReportTime).
+  // Token is AES-256-GCM encrypted at rest — see common/secret-crypto.ts.
+  // webhookSecret is compared against Telegram's X-Telegram-Bot-Api-Secret-Token
+  // header to reject spoofed webhook calls.
   telegramBotTokenEnc          String?
   telegramWebhookSecret        String?
   telegramRegistrationCode     String?
   telegramRegistrationCodeDate DateTime? @db.Date
+
+  // This organization's own "main" bot — used for real-time attendance
+  // notifications, daily reports, and the interactive command menu
+  // (backend/src/modules/telegram-bot/). Falls back to env.TELEGRAM_BOT_TOKEN
+  // (a single platform-wide bot) when unset — see common/telegram.ts's
+  // resolveNotifyBotToken(). Distinct from telegramBotTokenEnc above, which
+  // is only the employee self-registration bot.
+  telegramNotifyBotTokenEnc String?
 
   // This organization's own Hik-Connect for Teams cloud credentials — lets
   // the org connect its own account directly from the Devices page instead
@@ -513,6 +523,14 @@ model Device {
   // Telegram group this device's check-in/check-out events are sent to.
   // Falls back to Organization.telegramChatId when unset.
   telegramChatId String?
+
+  // Daily attendance report (Excel+PDF) delivery for this device's own
+  // telegramChatId — "HH:mm" in Asia/Tashkent, null defaults to "18:00".
+  // dailyReportLastSentDate guards against sending twice on the same day
+  // (jobs/daily-report.job.ts polls every minute) — same pattern as
+  // Organization.telegramRegistrationCodeDate.
+  dailyReportTime         String?
+  dailyReportLastSentDate DateTime? @db.Date
 
   // Cursor for the ISAPI attendance-polling fallback (jobs/hikvision-attendance-poll.job.ts)
   // — the AcsEvent search window's start time for this device's next poll.

@@ -34,6 +34,13 @@ export const updateDeviceSchema = z.object({
   // Telegram group this device's check-in/check-out events are sent to —
   // null clears it (falls back to the organization's default chat).
   telegramChatId: z.string().max(64).nullable().optional(),
+  // "HH:mm" (Asia/Tashkent) daily report send time for this device's own
+  // telegramChatId — null clears it (falls back to "18:00", see jobs/daily-report.job.ts).
+  dailyReportTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:mm formatida bo'lishi kerak")
+    .nullable()
+    .optional(),
 });
 export type UpdateDeviceDto = z.infer<typeof updateDeviceSchema>;
 
