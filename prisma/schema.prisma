@@ -476,6 +476,16 @@ model Attendance {
   /// at the day's first check-in once set.
   lastCheckInAt  DateTime?
 
+  /// The device's own live verification snapshot at the moment of the day's
+  /// first check-in / latest check-out (a local /uploads/attendance/ copy,
+  /// downloaded from the Hik-Connect cloud snapshot at event time since that
+  /// URL isn't guaranteed to stay valid later) — lets a daily report show
+  /// visual proof of who actually badged in/out, not just the matched name.
+  /// Only populated for Hik-Connect-routed device events; null otherwise
+  /// (manual/API check-ins, direct-ISAPI devices with no snapshot source).
+  checkInPhotoUrl  String?
+  checkOutPhotoUrl String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?

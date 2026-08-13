@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "../../config/prisma";
 import { toCsv } from "../../common/csv";
 import { getEmployeeIdsOnApprovedLeave } from "../leave/leave.service";
@@ -16,6 +18,9 @@ export interface DailyReportRow {
   hourlyRate: number;
   totalPay: number;
   note: string;
+  /** Local /uploads/attendance/ copy of the device's live verification snapshot — visual proof of who actually badged in/out. */
+  checkInPhotoUrl: string | null;
+  checkOutPhotoUrl: string | null;
 }
 
 // .toISOString() renders UTC — the stored instant is correct, but this report
@@ -76,6 +81,8 @@ export async function getDailyAttendanceReport(organizationId: string, date: Dat
       hourlyRate: Math.round(hourlyRate * 100) / 100,
       totalPay,
       note,
+      checkInPhotoUrl: record?.checkInPhotoUrl ?? null,
+      checkOutPhotoUrl: record?.checkOutPhotoUrl ?? null,
     };
   });
 }
@@ -92,6 +99,8 @@ const REPORT_HEADER = [
   "Jami summa",
   "Izoh",
 ];
+
+const PHOTO_HEADER = ["Kirish rasmi", "Chiqish rasmi"];
 
 function rowToCells(row: DailyReportRow): (string | number)[] {
   return [
@@ -112,16 +121,61 @@ export function dailyReportToCsv(rows: DailyReportRow[]): string {
   return toCsv([REPORT_HEADER, ...rows.map(rowToCells)]);
 }
 
+/** Reads back a locally-stored /uploads/... file (see attendance-recorder.ts's downloadAndSaveSnapshot) as a buffer, for embedding in a report. */
+async function readLocalUpload(url: string): Promise<Buffer | null> {
+  try {
+    const relative = url.replace(/^\/uploads\//, "");
+    const absolute = path.join(__dirname, "..", "..", "..", "uploads", relative);
+    return await readFile(absolute);
+  } catch {
+    return null;
+  }
+}
+
+const PHOTO_CELL_SIZE = 60; // pixels, both Excel and PDF thumbnails
+
 export async function dailyReportToExcel(rows: DailyReportRow[]): Promise<Buffer> {
   const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Davomat");
 
-  sheet.addRow(REPORT_HEADER);
+  sheet.addRow([...REPORT_HEADER, ...PHOTO_HEADER]);
   sheet.getRow(1).font = { bold: true };
-  rows.forEach((row) => sheet.addRow(rowToCells(row)));
-  sheet.columns.forEach((col) => {
-    col.width = 16;
+
+  for (const row of rows) {
+    const excelRow = sheet.addRow(rowToCells(row));
+    if (row.checkInPhotoUrl || row.checkOutPhotoUrl) {
+      excelRow.height = PHOTO_CELL_SIZE * 0.75; // px -> points
+    }
+    const rowIndex = excelRow.number - 1; // addImage anchors are 0-indexed
+
+    if (row.checkInPhotoUrl) {
+      const buffer = await readLocalUpload(row.checkInPhotoUrl);
+      if (buffer) {
+        // exceljs's own bundled @types/node (nested in its node_modules)
+        // predates Node's generic Buffer<T>, so its Buffer is a structurally
+        // different type from this project's — a real Buffer at runtime,
+        // just an unresolvable nominal mismatch at the type level.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const imageId = workbook.addImage({ buffer, extension: "jpeg" } as any);
+        sheet.addImage(imageId, { tl: { col: REPORT_HEADER.length, row: rowIndex }, ext: { width: PHOTO_CELL_SIZE, height: PHOTO_CELL_SIZE } });
+      }
+    }
+    if (row.checkOutPhotoUrl) {
+      const buffer = await readLocalUpload(row.checkOutPhotoUrl);
+      if (buffer) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const imageId = workbook.addImage({ buffer, extension: "jpeg" } as any);
+        sheet.addImage(imageId, {
+          tl: { col: REPORT_HEADER.length + 1, row: rowIndex },
+          ext: { width: PHOTO_CELL_SIZE, height: PHOTO_CELL_SIZE },
+        });
+      }
+    }
+  }
+
+  sheet.columns.forEach((col, i) => {
+    col.width = i >= REPORT_HEADER.length ? 10 : 16;
   });
 
   const buffer = await workbook.xlsx.writeBuffer();
@@ -130,6 +184,16 @@ export async function dailyReportToExcel(rows: DailyReportRow[]): Promise<Buffer
 
 export async function dailyReportToPdf(rows: DailyReportRow[], date: Date): Promise<Buffer> {
   const PDFDocument = (await import("pdfkit")).default;
+
+  // Photos are read up front (async) so the PDFKit document itself can stay
+  // fully synchronous below — pdfkit streams as it draws, so interleaving
+  // async file reads into that flow is unreliable.
+  const photosByRow = await Promise.all(
+    rows.map(async (row) => ({
+      checkIn: row.checkInPhotoUrl ? await readLocalUpload(row.checkInPhotoUrl) : null,
+      checkOut: row.checkOutPhotoUrl ? await readLocalUpload(row.checkOutPhotoUrl) : null,
+    })),
+  );
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 30, size: "A4", layout: "landscape" });
@@ -141,27 +205,55 @@ export async function dailyReportToPdf(rows: DailyReportRow[], date: Date): Prom
     doc.fontSize(14).text(`Davomat hisoboti — ${date.toISOString().slice(0, 10)}`, { align: "center" });
     doc.moveDown();
 
-    const colWidths = [55, 60, 110, 45, 45, 55, 50, 55, 60, 70];
+    const header = [...REPORT_HEADER, ...PHOTO_HEADER];
+    const colWidths = [48, 50, 90, 38, 38, 48, 42, 46, 52, 55, 46, 46];
     const startX = doc.x;
     let y = doc.y;
 
-    doc.fontSize(8).font("Helvetica-Bold");
-    REPORT_HEADER.forEach((header, i) => {
-      doc.text(header, startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0), y, { width: colWidths[i] });
-    });
-    y += 16;
+    const drawHeader = () => {
+      doc.fontSize(8).font("Helvetica-Bold");
+      header.forEach((h, i) => {
+        doc.text(h, startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0), y, { width: colWidths[i] });
+      });
+      y += 16;
+      doc.font("Helvetica");
+    };
+    drawHeader();
 
-    doc.font("Helvetica");
-    rows.forEach((row) => {
+    const photoSize = 36;
+    rows.forEach((row, index) => {
+      const photos = photosByRow[index];
+      const rowHeight = photos.checkIn || photos.checkOut ? photoSize + 6 : 14;
+
+      if (y + rowHeight > 520) {
+        doc.addPage();
+        y = doc.y;
+        drawHeader();
+      }
+
       const cells = rowToCells(row).map(String);
       cells.forEach((cell, i) => {
         doc.text(cell, startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0), y, { width: colWidths[i] });
       });
-      y += 14;
-      if (y > 520) {
-        doc.addPage();
-        y = doc.y;
+
+      const checkInX = startX + colWidths.slice(0, REPORT_HEADER.length).reduce((a, b) => a + b, 0);
+      const checkOutX = checkInX + colWidths[REPORT_HEADER.length];
+      if (photos.checkIn) {
+        try {
+          doc.image(photos.checkIn, checkInX, y, { width: photoSize, height: photoSize });
+        } catch {
+          // Corrupt/unreadable image — skip it, the rest of the row's data still renders.
+        }
       }
+      if (photos.checkOut) {
+        try {
+          doc.image(photos.checkOut, checkOutX, y, { width: photoSize, height: photoSize });
+        } catch {
+          // Corrupt/unreadable image — skip it, the rest of the row's data still renders.
+        }
+      }
+
+      y += rowHeight;
     });
 
     doc.end();

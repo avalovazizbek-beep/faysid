@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "../../config/prisma";
@@ -25,6 +27,32 @@ async function readEmployeePhoto(photoUrl: string): Promise<Buffer | null> {
     return await readFile(absolute);
   } catch (error) {
     logger.warn(`Telegram notification: could not read employee photo ${photoUrl}: ${error}`);
+    return null;
+  }
+}
+
+/**
+ * Downloads a Hik-Connect cloud snapshot URL and saves it as a permanent
+ * local copy (/uploads/attendance/) — the cloud URL is only used once here
+ * (and once by Telegram's own fetch for the real-time notification); a
+ * daily report generated hours later needs its own stable copy since that
+ * cloud URL isn't guaranteed to still resolve by then.
+ */
+async function downloadAndSaveSnapshot(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      logger.warn(`Attendance snapshot download failed (${response.status}): ${url}`);
+      return null;
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const dir = path.join(__dirname, "..", "..", "..", "uploads", "attendance");
+    mkdirSync(dir, { recursive: true });
+    const filename = `${randomUUID()}.jpg`;
+    writeFileSync(path.join(dir, filename), buffer);
+    return `/uploads/attendance/${filename}`;
+  } catch (error) {
+    logger.warn(`Attendance snapshot download failed: ${error}`);
     return null;
   }
 }
@@ -166,9 +194,11 @@ export async function recordDeviceAttendanceEvent(
     }
   }
 
+  const localPhotoUrl = options?.snapshotUrl ? await downloadAndSaveSnapshot(options.snapshotUrl) : null;
+
   try {
     if (isCheckOut) {
-      await checkOut(device.organizationId, { employeeId: employee.id });
+      await checkOut(device.organizationId, { employeeId: employee.id }, localPhotoUrl ?? undefined);
       logger.info(`Hikvision ${source}: recorded check-out for employee ${employee.id} via device ${device.id}`);
       await recordAuditLog({
         organizationId: device.organizationId,
@@ -179,7 +209,7 @@ export async function recordDeviceAttendanceEvent(
       });
       if (!options?.skipTelegram) await notifyTelegramAttendance(device, employee, true, options?.snapshotUrl);
     } else if (isCheckIn) {
-      await checkIn(device.organizationId, { employeeId: employee.id, type: "FACE" });
+      await checkIn(device.organizationId, { employeeId: employee.id, type: "FACE" }, localPhotoUrl ?? undefined);
       logger.info(`Hikvision ${source}: recorded check-in for employee ${employee.id} via device ${device.id}`);
       await recordAuditLog({
         organizationId: device.organizationId,

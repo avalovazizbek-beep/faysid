@@ -32,7 +32,15 @@ async function getOwnedEmployee(organizationId: string, employeeId: string) {
   return employee;
 }
 
-export async function checkIn(organizationId: string, dto: CheckInDto) {
+/**
+ * photoUrl: the device's own live verification snapshot at this exact
+ * check-in/check-out (already downloaded to local /uploads/attendance/ — see
+ * attendance-recorder.ts), stored so the daily report can show visual proof
+ * of who actually badged in/out. undefined for manual/API-triggered
+ * check-ins or devices with no snapshot source — never overwrites an
+ * existing photo with nothing.
+ */
+export async function checkIn(organizationId: string, dto: CheckInDto, photoUrl?: string) {
   const employee = await getOwnedEmployee(organizationId, dto.employeeId);
   const date = startOfToday();
   const now = new Date();
@@ -57,6 +65,7 @@ export async function checkIn(organizationId: string, dto: CheckInDto) {
         lastCheckInAt: now,
         type: dto.type,
         isLate,
+        ...(photoUrl ? { checkInPhotoUrl: photoUrl } : {}),
       },
     });
   } else {
@@ -78,7 +87,7 @@ export async function checkIn(organizationId: string, dto: CheckInDto) {
   return attendance;
 }
 
-export async function checkOut(organizationId: string, dto: CheckOutDto) {
+export async function checkOut(organizationId: string, dto: CheckOutDto, photoUrl?: string) {
   await getOwnedEmployee(organizationId, dto.employeeId);
   const date = startOfToday();
   const now = new Date();
@@ -98,7 +107,7 @@ export async function checkOut(organizationId: string, dto: CheckOutDto) {
 
   const attendance = await prisma.attendance.update({
     where: { id: existing.id },
-    data: { checkOutAt: now, workedMinutes },
+    data: { checkOutAt: now, workedMinutes, ...(photoUrl ? { checkOutPhotoUrl: photoUrl } : {}) },
   });
 
   emitToOrganization(organizationId, "attendance:updated", { employeeId: dto.employeeId, action: "check-out" });
