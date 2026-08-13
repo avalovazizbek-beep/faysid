@@ -1,3 +1,4 @@
+import dns from "node:dns";
 import { createServer } from "node:http";
 import { createApp } from "./app";
 import { env } from "./config/env";
@@ -12,6 +13,14 @@ import { startHikvisionPollCron } from "./jobs/hikvision-poll.job";
 import { startHikvisionAttendancePollCron } from "./jobs/hikvision-attendance-poll.job";
 import { startTelegramRegistrationCodeCron } from "./jobs/telegram-registration-code.job";
 import { registerTelegramBotWebhook } from "./modules/telegram-bot/telegram-bot.service";
+
+// Some VPS hosts advertise an IPv6 route for outbound domains (Telegram,
+// Hik-Connect, ...) that doesn't actually work — Node's fetch (undici) tries
+// it before IPv4 and eats the full connect timeout on every request
+// (confirmed live: AggregateError [ETIMEDOUT] from internalConnectMultiple,
+// while `curl` to the same host succeeded instantly since it prefers IPv4).
+// Forcing IPv4-first here fixes every outbound fetch() call app-wide.
+dns.setDefaultResultOrder("ipv4first");
 
 async function bootstrap(): Promise<void> {
   await prisma.$connect();
