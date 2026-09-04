@@ -53,10 +53,22 @@ export function createApp(): Application {
 
   app.disable("x-powered-by");
   app.use(helmet());
+  // CORS_ORIGIN is normally one origin, but a comma-separated list is accepted
+  // too — lets more than one deployed frontend (e.g. the full ERP UI and a
+  // lighter panel, each its own Netlify site) reach this same backend without
+  // needing a code change every time a new one is added.
+  const allowedOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean);
+
   app.use(
     cors({
       origin: isProduction
-        ? env.CORS_ORIGIN
+        ? (origin, callback) => {
+            if (!origin || allowedOrigins.includes(origin)) {
+              callback(null, true);
+              return;
+            }
+            callback(new Error(`Origin ${origin} not allowed by CORS`));
+          }
         : (origin, callback) => {
             // Vite picks the next free port when its default is taken, so in dev we
             // accept any localhost origin rather than hard-failing on a port mismatch.
