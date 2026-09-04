@@ -92,7 +92,11 @@ export async function runHikvisionAttendancePoll(): Promise<void> {
 
       for (const event of deduped) {
         const snapshotUrl = event.serialNo ? snapshots?.get(event.serialNo) : undefined;
-        await recordDeviceAttendanceEvent(device, event.employeeNo, event.attendanceStatus, "poll", { snapshotUrl });
+        const eventTime = new Date(event.time);
+        await recordDeviceAttendanceEvent(device, event.employeeNo, event.attendanceStatus, "poll", {
+          snapshotUrl,
+          eventTime: Number.isNaN(eventTime.getTime()) ? undefined : eventTime,
+        });
       }
 
       if (deduped.length > 0) {

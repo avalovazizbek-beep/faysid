@@ -486,17 +486,35 @@ model Attendance {
   checkInPhotoUrl  String?
   checkOutPhotoUrl String?
 
+  /// The device that produced the most recent event for this session (set at
+  /// check-in, refreshed on every mid-shift touch) — lets the scheduled
+  /// shift-finalize job (jobs/attendance-shift-finalize.job.ts) know which
+  /// Telegram chat to notify for the "chiqdi" message it sends on the
+  /// employee's behalf, well after the original triggering request returned.
+  deviceId String?
+
+  /// Most recent raw detection while this session is open — updated on every
+  /// mid-shift re-scan (attendance.service.ts's touchOpenSession()) without
+  /// touching checkInAt/checkOutAt. The shift-finalize job uses this as the
+  /// TRUE check-out time/photo once the shift has ended, instead of "now" —
+  /// this is what turns "every scan is a potential keldi/chiqdi" into exactly
+  /// one of each per shift.
+  lastSeenAt       DateTime?
+  lastSeenPhotoUrl String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  device       Device?      @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   @@unique([employeeId, date])
   @@index([organizationId])
   @@index([date])
   @@index([employeeId])
+  @@index([deviceId])
   @@map("attendances")
 }
 
@@ -554,6 +572,7 @@ model Device {
 
   organization  Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   employeeSyncs DeviceEmployeeSync[]
+  attendances   Attendance[]
 
   @@index([organizationId])
   @@index([status])

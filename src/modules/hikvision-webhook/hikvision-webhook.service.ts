@@ -1,6 +1,9 @@
 import { prisma } from "../../config/prisma";
 import { logger } from "../../config/logger";
 import { recordAuditLog } from "../../common/audit-log";
+import * as hikConnect from "../hikconnect/hikconnect-api";
+import { getHikConnectCredentials as getPlatformHikConnectCredentials } from "../platform-settings/platform-settings.service";
+import { getOrgHikConnectCredentials } from "../device/device-hikconnect.service";
 import { recordDeviceAttendanceEvent } from "./attendance-recorder";
 
 /**
@@ -15,6 +18,10 @@ interface ParsedHikvisionEvent {
   attendanceStatus: string;
   dateTime: Date;
   deviceIdentifiers: string[];
+  /** ISAPI AcsEvent's own event serial number, if the push includes it — correlates
+   * this event with its cloud-side verification snapshot (Hik-Connect
+   * certificaterecords' devSerialNo), same as the poll path's searchDeviceEvents(). */
+  serialNo: string | null;
 }
 
 function parseEventObject(raw: unknown): ParsedHikvisionEvent {
@@ -38,7 +45,38 @@ function parseEventObject(raw: unknown): ParsedHikvisionEvent {
   const deviceIdentifiers = [eventObj.macAddress, eventObj.deviceID, eventObj.serialNumber, eventObj.ipAddress]
     .filter((v): v is string => typeof v === "string" && v.length > 0);
 
-  return { employeeNo, attendanceStatus, dateTime, deviceIdentifiers };
+  const serialNoRaw = accessEvent.serialNo ?? eventObj.serialNo;
+  const serialNo = serialNoRaw !== undefined && serialNoRaw !== null ? String(serialNoRaw) : null;
+
+  return { employeeNo, attendanceStatus, dateTime, deviceIdentifiers, serialNo };
+}
+
+/**
+ * Best-effort lookup of this push event's own clean verification snapshot —
+ * mirrors jobs/hikvision-attendance-poll.job.ts's approach (Hik-Connect cloud
+ * certificaterecords/search, correlated by serialNo) so the fast real-time
+ * webhook path carries the same quality photo the slower poll path already
+ * did. Only possible for devices bound to Hik-Connect's cloud (hikConnectDeviceId
+ * set) and pushes that include a serialNo; returns undefined otherwise so the
+ * caller falls back to the employee's stored profile photo, same as before.
+ */
+async function fetchWebhookSnapshot(
+  device: { organizationId: string; hikConnectDeviceId: string | null },
+  serialNo: string | null,
+  dateTime: Date,
+): Promise<string | undefined> {
+  if (!device.hikConnectDeviceId || !serialNo) return undefined;
+  try {
+    const credentials = (await getOrgHikConnectCredentials(device.organizationId)) ?? (await getPlatformHikConnectCredentials());
+    if (!credentials) return undefined;
+    const windowStart = new Date(dateTime.getTime() - 2 * 60_000);
+    const windowEnd = new Date(dateTime.getTime() + 2 * 60_000);
+    const snapshots = await hikConnect.searchCertificateSnapshots(credentials, device.hikConnectDeviceId, windowStart, windowEnd);
+    return snapshots.get(serialNo);
+  } catch (error) {
+    logger.warn(`Hikvision webhook: could not fetch verification snapshot: ${error}`);
+    return undefined;
+  }
 }
 
 function extractRawEvent(body: Record<string, unknown>, files: Express.Multer.File[]): unknown {
@@ -113,5 +151,10 @@ export async function processHikvisionEvent(body: Record<string, unknown>, files
     return;
   }
 
-  await recordDeviceAttendanceEvent(device, parsed.employeeNo, parsed.attendanceStatus, "webhook");
+  const snapshotUrl = await fetchWebhookSnapshot(device, parsed.serialNo, parsed.dateTime);
+
+  await recordDeviceAttendanceEvent(device, parsed.employeeNo, parsed.attendanceStatus, "webhook", {
+    eventTime: parsed.dateTime,
+    snapshotUrl,
+  });
 }

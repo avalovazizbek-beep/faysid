@@ -12,6 +12,7 @@ import { startDeviceOfflineCron } from "./jobs/device-offline.job";
 import { startDailyReportCron } from "./jobs/daily-report.job";
 import { startHikvisionPollCron } from "./jobs/hikvision-poll.job";
 import { startHikvisionAttendancePollCron } from "./jobs/hikvision-attendance-poll.job";
+import { startAttendanceShiftFinalizeCron } from "./jobs/attendance-shift-finalize.job";
 import { startTelegramRegistrationCodeCron } from "./jobs/telegram-registration-code.job";
 import { registerTelegramBotWebhook } from "./modules/telegram-bot/telegram-bot.service";
 
@@ -43,6 +44,7 @@ async function bootstrap(): Promise<void> {
   startDailyReportCron();
   startHikvisionPollCron();
   startHikvisionAttendancePollCron();
+  startAttendanceShiftFinalizeCron();
   startTelegramRegistrationCodeCron();
   await registerTelegramBotWebhook();
 
